@@ -1,0 +1,521 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Platform Super Admin registry document",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "PlatformSettings": {
+      "title": "PlatformSettings",
+      "description": "Global platform configuration editable by Super Admin",
+      "type": "object",
+      "properties": {
+        "trialDays": { "type": "number" },
+        "bankName": { "type": "string", "maxLength": 120 },
+        "bankAccountName": { "type": "string", "maxLength": 150 },
+        "bankAccountNumber": { "type": "string", "maxLength": 50 },
+        "promptPayId": { "type": "string", "maxLength": 50 },
+        "supportEmail": { "type": "string", "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["trialDays", "bankName", "bankAccountName", "bankAccountNumber", "updatedAt"]
+    },
+    "Plan": {
+      "title": "Plan",
+      "description": "Annual subscription pricing tier",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 80 },
+        "nameTh": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 400 },
+        "priceAnnual": { "type": "number" },
+        "maxTeachers": { "type": "number" },
+        "features": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "nameTh", "priceAnnual", "maxTeachers", "features", "isActive", "updatedAt"]
+    },
+    "Coupon": {
+      "title": "Coupon",
+      "description": "Promotional discount code",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 40, "pattern": "^[A-Z0-9_\\-]+$" },
+        "discountPercent": { "type": "number" },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "discountPercent", "maxUses", "usedCount", "isActive", "createdAt"]
+    },
+    "School": {
+      "title": "School",
+      "description": "Multi-tenant school root document including profile, branding, and subscription state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "slug": { "type": "string", "minLength": 2, "maxLength": 64, "pattern": "^[a-z0-9\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "nameTh": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "nameEn": { "type": "string", "maxLength": 200 },
+        "schoolCode": { "type": "string", "maxLength": 50 },
+        "affiliation": { "type": "string", "maxLength": 150 },
+        "address": { "type": "string", "maxLength": 400 },
+        "province": { "type": "string", "maxLength": 100 },
+        "district": { "type": "string", "maxLength": 100 },
+        "subdistrict": { "type": "string", "maxLength": 100 },
+        "postalCode": { "type": "string", "maxLength": 16 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 200 },
+        "website": { "type": "string", "maxLength": 300 },
+        "directorName": { "type": "string", "maxLength": 150 },
+        "academicYear": { "type": "string", "maxLength": 20 },
+        "semester": { "type": "string", "maxLength": 20 },
+        "logoUrl": { "type": "string", "maxLength": 600000 },
+        "loginCoverUrl": { "type": "string", "maxLength": 800000 },
+        "backgroundUrl": { "type": "string", "maxLength": 800000 },
+        "primaryColor": { "type": "string", "maxLength": 20 },
+        "secondaryColor": { "type": "string", "maxLength": 20 },
+        "welcomeMessage": { "type": "string", "maxLength": 300 },
+        "planId": { "type": "string", "maxLength": 64 },
+        "subscriptionStatus": {
+          "type": "string",
+          "enum": ["trialing", "pending_payment", "pending_verification", "active", "past_due", "expired", "suspended", "cancelled"]
+        },
+        "trialEndsAt": { "type": "string", "format": "date-time" },
+        "currentPeriodEnd": { "type": "string", "format": "date-time" },
+        "teacherCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "slug", "ownerUid", "nameTh", "planId", "subscriptionStatus", "createdAt", "updatedAt"]
+    },
+    "SchoolSlug": {
+      "title": "SchoolSlug",
+      "description": "Public slug mapping for non-PII tenant login branding resolution",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "minLength": 2, "maxLength": 64, "pattern": "^[a-z0-9\\-]+$" },
+        "schoolId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "nameTh": { "type": "string", "maxLength": 200 },
+        "nameEn": { "type": "string", "maxLength": 200 },
+        "logoUrl": { "type": "string", "maxLength": 600000 },
+        "loginCoverUrl": { "type": "string", "maxLength": 800000 },
+        "backgroundUrl": { "type": "string", "maxLength": 800000 },
+        "primaryColor": { "type": "string", "maxLength": 20 },
+        "secondaryColor": { "type": "string", "maxLength": 20 },
+        "welcomeMessage": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["slug", "schoolId", "ownerUid", "nameTh", "updatedAt"]
+    },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Authenticated user profile and primary tenant linkage",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "displayName": { "type": "string", "maxLength": 150 },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "schoolSlug": { "type": "string", "maxLength": 64 },
+        "role": { "type": "string", "enum": ["super_admin", "school_admin", "scheduler", "teacher"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "Tenant subscription lifecycle record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "schoolId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "planId": { "type": "string", "maxLength": 64 },
+        "status": {
+          "type": "string",
+          "enum": ["trialing", "pending_payment", "pending_verification", "active", "past_due", "expired", "suspended", "cancelled"]
+        },
+        "trialEndsAt": { "type": "string", "format": "date-time" },
+        "currentPeriodStart": { "type": "string", "format": "date-time" },
+        "currentPeriodEnd": { "type": "string", "format": "date-time" },
+        "autoRenew": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "ownerUid", "planId", "status", "createdAt", "updatedAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Subscription payment record for Bank Transfer or Payment Gateway",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "schoolId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "schoolName": { "type": "string", "maxLength": 200 },
+        "subscriptionId": { "type": "string", "maxLength": 128 },
+        "planId": { "type": "string", "maxLength": 64 },
+        "amount": { "type": "number" },
+        "discountAmount": { "type": "number" },
+        "couponCode": { "type": "string", "maxLength": 40 },
+        "method": { "type": "string", "enum": ["bank_transfer", "gateway"] },
+        "status": { "type": "string", "enum": ["pending_payment", "pending_verification", "approved", "rejected", "failed"] },
+        "slipUrl": { "type": "string", "maxLength": 800000 },
+        "transferDate": { "type": "string", "maxLength": 60 },
+        "transferReference": { "type": "string", "maxLength": 120 },
+        "gatewaySessionId": { "type": "string", "maxLength": 200 },
+        "gatewaySignature": { "type": "string", "maxLength": 256 },
+        "notes": { "type": "string", "maxLength": 400 },
+        "createdBy": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "verifiedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "planId", "amount", "method", "status", "createdBy", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable audit log for security and tenant actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "actorUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorEmail": { "type": "string", "maxLength": 200 },
+        "action": { "type": "string", "maxLength": 100 },
+        "targetType": { "type": "string", "maxLength": 80 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "actorUid", "action", "targetType", "createdAt"]
+    },
+    "SchoolMember": {
+      "title": "SchoolMember",
+      "description": "Member role mapping inside a specific school tenant",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "displayName": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["school_admin", "scheduler", "teacher"] },
+        "status": { "type": "string", "enum": ["active", "invited", "disabled"] },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "inviteId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "status", "createdAt", "updatedAt"]
+    },
+    "SchoolInvite": {
+      "title": "SchoolInvite",
+      "description": "Email invitation for a school member",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "schoolId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "role": { "type": "string", "enum": ["school_admin", "scheduler", "teacher"] },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "revoked"] },
+        "acceptedBy": { "type": "string", "maxLength": 128 },
+        "createdBy": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "schoolId", "email", "role", "status", "createdBy", "createdAt", "updatedAt"]
+    },
+    "AcademicYear": {
+      "title": "AcademicYear",
+      "description": "School academic year and semester configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "year": { "type": "string", "maxLength": 20 },
+        "semester": { "type": "string", "maxLength": 20 },
+        "isActive": { "type": "boolean" },
+        "daysOfWeek": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "year", "semester", "isActive", "daysOfWeek", "createdAt", "updatedAt"]
+    },
+    "Department": {
+      "title": "Department",
+      "description": "Academic learning area / department",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 30 },
+        "name": { "type": "string", "maxLength": 150 },
+        "color": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "color", "createdAt", "updatedAt"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "School teacher profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 40 },
+        "firstName": { "type": "string", "maxLength": 100 },
+        "lastName": { "type": "string", "maxLength": 100 },
+        "departmentId": { "type": "string", "maxLength": 128 },
+        "position": { "type": "string", "maxLength": 100 },
+        "maxHoursPerWeek": { "type": "number" },
+        "email": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "firstName", "lastName", "maxHoursPerWeek", "createdAt", "updatedAt"]
+    },
+    "Subject": {
+      "title": "Subject",
+      "description": "School course subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 40 },
+        "name": { "type": "string", "maxLength": 150 },
+        "departmentId": { "type": "string", "maxLength": 128 },
+        "gradeLevel": { "type": "string", "maxLength": 40 },
+        "credits": { "type": "number" },
+        "hoursPerWeek": { "type": "number" },
+        "defaultTeacherId": { "type": "string", "maxLength": 128 },
+        "color": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "name", "gradeLevel", "credits", "hoursPerWeek", "createdAt", "updatedAt"]
+    },
+    "Classroom": {
+      "title": "Classroom",
+      "description": "Student class group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 80 },
+        "gradeLevel": { "type": "string", "maxLength": 40 },
+        "homeroomTeacherId": { "type": "string", "maxLength": 128 },
+        "studentCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "gradeLevel", "createdAt", "updatedAt"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "Physical classroom or facility",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 40 },
+        "name": { "type": "string", "maxLength": 120 },
+        "building": { "type": "string", "maxLength": 100 },
+        "floor": { "type": "string", "maxLength": 20 },
+        "roomType": { "type": "string", "maxLength": 60 },
+        "capacity": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "name", "roomType", "capacity", "createdAt", "updatedAt"]
+    },
+    "TimeSlot": {
+      "title": "TimeSlot",
+      "description": "Bell schedule period or break slot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "periodNumber": { "type": "number" },
+        "label": { "type": "string", "maxLength": 60 },
+        "startTime": { "type": "string", "maxLength": 16 },
+        "endTime": { "type": "string", "maxLength": 16 },
+        "isBreak": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "periodNumber", "label", "startTime", "endTime", "isBreak", "createdAt", "updatedAt"]
+    },
+    "ActivityLock": {
+      "title": "ActivityLock",
+      "description": "Global school/grade/class activity time lock",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "academicYearId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "category": { "type": "string", "maxLength": 60 },
+        "scope": { "type": "string", "enum": ["whole_school", "grade_level", "classroom"] },
+        "targetGradeLevel": { "type": "string", "maxLength": 40 },
+        "targetClassroomId": { "type": "string", "maxLength": 128 },
+        "dayOfWeek": { "type": "number" },
+        "periodNumber": { "type": "number" },
+        "venue": { "type": "string", "maxLength": 150 },
+        "roomId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "academicYearId", "name", "category", "scope", "dayOfWeek", "periodNumber", "createdAt", "updatedAt"]
+    },
+    "TimetableEntry": {
+      "title": "TimetableEntry",
+      "description": "Scheduled lesson entry in weekly timetable",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "academicYearId": { "type": "string", "maxLength": 128 },
+        "dayOfWeek": { "type": "number" },
+        "periodNumber": { "type": "number" },
+        "classroomId": { "type": "string", "maxLength": 128 },
+        "subjectId": { "type": "string", "maxLength": 128 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "roomId": { "type": "string", "maxLength": 128 },
+        "revision": { "type": "number" },
+        "updatedBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "academicYearId", "dayOfWeek", "periodNumber", "classroomId", "subjectId", "teacherId", "roomId", "revision", "updatedBy", "createdAt", "updatedAt"]
+    },
+    "ScheduleVersion": {
+      "title": "ScheduleVersion",
+      "description": "Timetable backup snapshot",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "academicYearId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "entryCount": { "type": "number" },
+        "entries": { "type": "array" },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "academicYearId", "name", "entryCount", "entries", "createdBy", "createdAt"]
+    },
+    "ScheduleHistory": {
+      "title": "ScheduleHistory",
+      "description": "Timetable edit history log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "academicYearId": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 80 },
+        "summary": { "type": "string", "maxLength": 300 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "academicYearId", "action", "summary", "actorUid", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Platform super admins"
+    },
+    "/platformSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/PlatformSettings" },
+      "description": "Global platform configuration"
+    },
+    "/plans/{planId}": {
+      "schema": { "$ref": "#/entities/Plan" },
+      "description": "Subscription tiers"
+    },
+    "/coupons/{couponId}": {
+      "schema": { "$ref": "#/entities/Coupon" },
+      "description": "Promotional discount codes"
+    },
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/School" },
+      "description": "Multi-tenant school profile and branding"
+    },
+    "/schoolSlugs/{slug}": {
+      "schema": { "$ref": "#/entities/SchoolSlug" },
+      "description": "Public non-PII tenant slug branding lookup"
+    },
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Private user account profile"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": { "$ref": "#/entities/Subscription" },
+      "description": "School subscription records"
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Subscription payment records"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Platform and tenant audit logs"
+    },
+    "/schools/{schoolId}/members/{memberUid}": {
+      "schema": { "$ref": "#/entities/SchoolMember" },
+      "description": "School tenant member roles"
+    },
+    "/schools/{schoolId}/invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/SchoolInvite" },
+      "description": "School tenant email invitations"
+    },
+    "/schools/{schoolId}/academicYears/{yearId}": {
+      "schema": { "$ref": "#/entities/AcademicYear" },
+      "description": "School academic years"
+    },
+    "/schools/{schoolId}/departments/{deptId}": {
+      "schema": { "$ref": "#/entities/Department" },
+      "description": "School departments"
+    },
+    "/schools/{schoolId}/teachers/{teacherId}": {
+      "schema": { "$ref": "#/entities/Teacher" },
+      "description": "School teachers"
+    },
+    "/schools/{schoolId}/subjects/{subjectId}": {
+      "schema": { "$ref": "#/entities/Subject" },
+      "description": "School subjects"
+    },
+    "/schools/{schoolId}/classrooms/{classroomId}": {
+      "schema": { "$ref": "#/entities/Classroom" },
+      "description": "School classrooms"
+    },
+    "/schools/{schoolId}/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "School physical rooms"
+    },
+    "/schools/{schoolId}/timeSlots/{slotId}": {
+      "schema": { "$ref": "#/entities/TimeSlot" },
+      "description": "School bell schedule slots"
+    },
+    "/schools/{schoolId}/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/ActivityLock" },
+      "description": "Global activity locks"
+    },
+    "/schools/{schoolId}/timetables/{entryId}": {
+      "schema": { "$ref": "#/entities/TimetableEntry" },
+      "description": "Timetable entries"
+    },
+    "/schools/{schoolId}/scheduleVersions/{versionId}": {
+      "schema": { "$ref": "#/entities/ScheduleVersion" },
+      "description": "Timetable version backups"
+    },
+    "/schools/{schoolId}/scheduleHistory/{historyId}": {
+      "schema": { "$ref": "#/entities/ScheduleHistory" },
+      "description": "Timetable edit history"
+    }
+  }
+}

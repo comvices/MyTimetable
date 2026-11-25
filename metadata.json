@@ -1,0 +1,6 @@
+{
+  "name": "ตารางเรียนคลาวด์ (KruSchedule SaaS)",
+  "description": "แพลตฟอร์มบริหารจัดการตารางสอนและตารางเรียนสำหรับโรงเรียนหลายแห่ง (Multi-Tenant SaaS) พร้อมระบบตรวจตารางชน แจ้งเตือนทดลองใช้ และระบบสมาชิก",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
