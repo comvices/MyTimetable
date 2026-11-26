@@ -13,7 +13,7 @@ export function createApiApp() {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
 
-  app.get('/api/health', (_req, res) => {
+  app.get(['/api', '/api/health'], (_req, res) => {
     res.json({
       ok: true,
       service: 'ระบบจัดตารางสอน',
@@ -43,8 +43,9 @@ async function startStandaloneServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(distDir));
+    app.use(express.static(distDir, { index: false }));
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }
