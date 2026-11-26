@@ -128,10 +128,20 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         getDoc(doc(db, 'platformSettings', 'global')),
       ]);
       if (!plansSnap.empty) {
-        const fetchedPlans = plansSnap.docs
-          .map((d) => d.data() as Plan)
-          .sort((a, b) => a.priceAnnual - b.priceAnnual);
-        setPlans(fetchedPlans);
+        const fetchedMap = new Map(plansSnap.docs.map((d) => [d.id, d.data() as Plan]));
+        const merged = DEFAULT_PLANS.map((defPlan) => {
+          const remote = fetchedMap.get(defPlan.id);
+          if (remote && remote.isActive !== false) {
+            return {
+              ...defPlan,
+              ...remote,
+              priceAnnual: remote.priceAnnual ?? defPlan.priceAnnual,
+              maxTeachers: remote.maxTeachers ?? defPlan.maxTeachers,
+            };
+          }
+          return defPlan;
+        });
+        setPlans(merged.filter((p) => p.isActive));
       } else {
         setPlans(DEFAULT_PLANS);
       }
@@ -139,7 +149,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         setPlatformSettings(settingsSnap.data() as PlatformSettings);
       }
     } catch {
-      // Fall back to default catalog on initial unbootstrapped DB
+      setPlans(DEFAULT_PLANS);
     }
   }, []);
 

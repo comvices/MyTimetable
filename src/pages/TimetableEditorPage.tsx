@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -10,7 +10,10 @@ import {
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import {
+  AlertCircle,
   AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
   Copy,
   History,
   Lock,
@@ -23,6 +26,7 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { WorkspaceShell } from '../components/layout/WorkspaceShell';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
@@ -52,6 +56,17 @@ interface UndoAction {
   type: 'move' | 'upsert' | 'delete';
   entry: Omit<TimetableEntry, 'createdAt' | 'updatedAt'>;
   previousState?: Omit<TimetableEntry, 'createdAt' | 'updatedAt'>;
+}
+
+interface MoveAlertState {
+  variant: 'success' | 'warning' | 'error';
+  title: string;
+  message: string;
+  subjectLabel?: string;
+  teacherLabel?: string;
+  fromLabel?: string;
+  toLabel?: string;
+  canUndo?: boolean;
 }
 
 const PASTEL_SUBJECT_FALLBACKS = [
@@ -194,6 +209,25 @@ export function TimetableEditorPage() {
   const [versionModalOpen, setVersionModalOpen] = useState(false);
   const [versionName, setVersionName] = useState('');
   const [copySourceYearId, setCopySourceYearId] = useState('');
+  const [moveAlert, setMoveAlert] = useState<MoveAlertState | null>(null);
+
+  useEffect(() => {
+    if (!moveAlert) return;
+    const handleKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setMoveAlert(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    const timer =
+      moveAlert.variant === 'success'
+        ? window.setTimeout(() => {
+            setMoveAlert(null);
+          }, 4000)
+        : undefined;
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [moveAlert]);
 
   const activeYear = useMemo(
     () =>
@@ -435,6 +469,13 @@ export function TimetableEditorPage() {
     if (!dragged) return;
     if (dragged.dayOfWeek === targetDay && dragged.periodNumber === targetPeriod) return;
 
+    const subj = subjectMap.get(dragged.subjectId);
+    const teacher = teacherMap.get(dragged.teacherId);
+    const subjectLabel = subj ? `${subj.code} ${subj.name}`.trim() : 'รายวิชา';
+    const teacherLabel = teacher ? `${teacher.firstName} ${teacher.lastName}` : '';
+    const fromLabel = `วัน${DAY_LABELS_TH[dragged.dayOfWeek]} คาบที่ ${dragged.periodNumber}`;
+    const toLabel = `วัน${DAY_LABELS_TH[targetDay]} คาบที่ ${targetPeriod}`;
+
     const conflictMsg = checkCandidateSlotConflict(
       {
         id: dragged.id,
@@ -448,7 +489,15 @@ export function TimetableEditorPage() {
     );
 
     if (conflictMsg) {
-      showToast(`ย้ายคาบไม่ได้: ${conflictMsg}`, 'warning');
+      setMoveAlert({
+        variant: 'warning',
+        title: 'ไม่สามารถย้ายคาบสอนได้',
+        message: conflictMsg,
+        subjectLabel,
+        teacherLabel,
+        fromLabel,
+        toLabel,
+      });
       return;
     }
 
@@ -483,9 +532,26 @@ export function TimetableEditorPage() {
         `ย้ายวิชาจากวัน${DAY_LABELS_TH[dragged.dayOfWeek]} คาบ ${dragged.periodNumber} ไปวัน${DAY_LABELS_TH[targetDay]} คาบ ${targetPeriod}`,
         actor
       );
-      showToast('ย้ายคาบสอนสำเร็จ', 'success');
+      setMoveAlert({
+        variant: 'success',
+        title: 'ย้ายคาบสอนสำเร็จ',
+        message: 'บันทึกรายวิชาลงในช่วงเวลาใหม่เรียบร้อยแล้ว',
+        subjectLabel,
+        teacherLabel,
+        fromLabel,
+        toLabel,
+        canUndo: true,
+      });
     } catch (err) {
-      showToast(formatErrorMessage(err), 'error');
+      setMoveAlert({
+        variant: 'error',
+        title: 'เกิดข้อผิดพลาดในการย้ายคาบ',
+        message: formatErrorMessage(err),
+        subjectLabel,
+        teacherLabel,
+        fromLabel,
+        toLabel,
+      });
     }
   };
 
@@ -564,6 +630,14 @@ export function TimetableEditorPage() {
     if (!school || !activeYear || !canEdit) return;
     const entry = yearEntries.find((e) => e.id === entryId);
     if (!entry) return;
+
+    const subj = subjectMap.get(entry.subjectId);
+    const teacher = teacherMap.get(entry.teacherId);
+    const subjectLabel = subj ? `${subj.code} ${subj.name}`.trim() : 'รายวิชา';
+    const teacherLabel = teacher ? `${teacher.firstName} ${teacher.lastName}` : '';
+    const fromLabel = `วัน${DAY_LABELS_TH[entry.dayOfWeek]} คาบที่ ${entry.periodNumber}`;
+    const toLabel = `วัน${DAY_LABELS_TH[targetDay]} คาบที่ ${targetPeriod}`;
+
     try {
       await saveTimetableEntryTransaction(
         school.id,
@@ -589,9 +663,25 @@ export function TimetableEditorPage() {
         `ย้ายคาบชนไปวัน${DAY_LABELS_TH[targetDay]} คาบ ${targetPeriod}`,
         actor
       );
-      showToast(`ย้ายไปวัน${DAY_LABELS_TH[targetDay]} คาบ ${targetPeriod} แล้ว`, 'success');
+      setMoveAlert({
+        variant: 'success',
+        title: 'ย้ายคาบแก้ตารางชนสำเร็จ',
+        message: 'ย้ายรายวิชาไปยังคาบว่างแนะนำเรียบร้อยแล้ว',
+        subjectLabel,
+        teacherLabel,
+        fromLabel,
+        toLabel,
+      });
     } catch (err) {
-      showToast(formatErrorMessage(err), 'error');
+      setMoveAlert({
+        variant: 'error',
+        title: 'เกิดข้อผิดพลาดในการย้ายคาบ',
+        message: formatErrorMessage(err),
+        subjectLabel,
+        teacherLabel,
+        fromLabel,
+        toLabel,
+      });
     }
   };
 
@@ -1259,6 +1349,148 @@ export function TimetableEditorPage() {
           </div>
         </div>
       )}
+      {/* Large Centered Period Move Alert Overlay */}
+      <AnimatePresence>
+        {moveAlert && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setMoveAlert(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4"
+            role="alertdialog"
+            aria-modal="true"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative bg-white rounded-3xl border-2 max-w-lg w-full p-7 sm:p-8 shadow-2xl text-center space-y-5"
+              style={{
+                borderColor:
+                  moveAlert.variant === 'success'
+                    ? '#10b981'
+                    : moveAlert.variant === 'warning'
+                    ? '#f59e0b'
+                    : '#ef4444',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setMoveAlert(null)}
+                className="absolute top-4 right-4 p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                aria-label="ปิดการแจ้งเตือน"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex justify-center">
+                <div
+                  className={`w-20 h-20 rounded-full flex items-center justify-center ${
+                    moveAlert.variant === 'success'
+                      ? 'bg-emerald-100 text-emerald-600'
+                      : moveAlert.variant === 'warning'
+                      ? 'bg-amber-100 text-amber-600'
+                      : 'bg-rose-100 text-rose-600'
+                  }`}
+                >
+                  {moveAlert.variant === 'success' ? (
+                    <CheckCircle2 className="w-11 h-11" />
+                  ) : moveAlert.variant === 'warning' ? (
+                    <AlertTriangle className="w-11 h-11" />
+                  ) : (
+                    <AlertCircle className="w-11 h-11" />
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h3
+                  className={`text-2xl font-extrabold tracking-tight ${
+                    moveAlert.variant === 'success'
+                      ? 'text-emerald-800'
+                      : moveAlert.variant === 'warning'
+                      ? 'text-amber-800'
+                      : 'text-rose-800'
+                  }`}
+                >
+                  {moveAlert.title}
+                </h3>
+
+                {(moveAlert.subjectLabel || moveAlert.teacherLabel) && (
+                  <div className="text-base font-bold text-slate-900">
+                    {moveAlert.subjectLabel}
+                    {moveAlert.teacherLabel ? (
+                      <span className="font-medium text-slate-600"> · {moveAlert.teacherLabel}</span>
+                    ) : null}
+                  </div>
+                )}
+
+                {moveAlert.fromLabel && moveAlert.toLabel && (
+                  <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2 rounded-2xl bg-slate-100 text-sm font-semibold text-slate-800 mt-1">
+                    <span>{moveAlert.fromLabel}</span>
+                    <ArrowRight className="w-4 h-4 text-slate-500 shrink-0" />
+                    <span
+                      className={
+                        moveAlert.variant === 'success'
+                          ? 'text-emerald-700'
+                          : moveAlert.variant === 'warning'
+                          ? 'text-amber-700'
+                          : 'text-rose-700'
+                      }
+                    >
+                      {moveAlert.toLabel}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div
+                className={`rounded-2xl px-4 py-3.5 text-base font-semibold leading-relaxed border ${
+                  moveAlert.variant === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : moveAlert.variant === 'warning'
+                    ? 'bg-amber-50 border-amber-200 text-amber-950'
+                    : 'bg-rose-50 border-rose-200 text-rose-900'
+                }`}
+              >
+                {moveAlert.message}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+                {moveAlert.canUndo && undoStack.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoveAlert(null);
+                      void handleUndo();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-sm font-semibold text-slate-700 transition-colors"
+                  >
+                    <Undo2 className="w-4 h-4" />
+                    <span>ย้อนกลับการย้าย (Undo)</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setMoveAlert(null)}
+                  className={`px-8 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm transition-colors ${
+                    moveAlert.variant === 'success'
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : moveAlert.variant === 'warning'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
+                >
+                  {moveAlert.variant === 'success' ? 'ตกลง' : 'รับทราบ'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </WorkspaceShell>
   );
 }

@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Sparkles,
   Tag,
+  Trash2,
   UserCheck,
   UserMinus,
   UserPlus,
@@ -49,6 +50,7 @@ import { createSchoolInvite } from '../services/schoolService';
 import {
   approvePaymentAndActivateSchool,
   createCouponAdmin,
+  deleteSchoolAdmin,
   fetchAdminOverview,
   grantSuperAdminAccess,
   rejectPaymentAdmin,
@@ -76,7 +78,7 @@ type AdminTab = 'overview' | 'payments' | 'schools' | 'plans' | 'coupons' | 'adm
 export function SuperAdminPage() {
   const navigate = useNavigate();
   const { currentUser, isSuperAdmin } = useAuth();
-  const { plans, platformSettings, refreshTenant, setActiveSchoolById, setPreviewPersona } = useTenant();
+  const { school: activeSchool, plans, platformSettings, refreshTenant, setActiveSchoolById, setPreviewPersona } = useTenant();
   const { theme } = useTheme();
   const { showToast, confirmAction } = useToast();
 
@@ -103,6 +105,7 @@ export function SuperAdminPage() {
   const [schoolSearch, setSchoolSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [creatingDemo, setCreatingDemo] = useState(false);
+  const [deletingSchoolId, setDeletingSchoolId] = useState<string | null>(null);
   const [demoResult, setDemoResult] = useState<DemoSandboxResult | null>(null);
 
   const [testInviteSchoolId, setTestInviteSchoolId] = useState('');
@@ -309,6 +312,39 @@ export function SuperAdminPage() {
       showToast(formatErrorMessage(err), 'error');
     } finally {
       setCreatingInvite(false);
+    }
+  };
+
+  const handleDeleteSchool = async (sch: School) => {
+    const ok = await confirmAction({
+      title: `ลบโรงเรียน "${sch.nameTh}"?`,
+      description: `ต้องการลบโรงเรียน ${sch.nameTh} (${sch.slug}) ออกจากระบบถาวรหรือไม่? ข้อมูลตารางสอน รายวิชา ครู ชั้นเรียน และสมาชิกทั้งหมดของโรงเรียนนี้จะถูกลบและไม่สามารถกู้คืนได้`,
+      confirmLabel: 'ยืนยันลบโรงเรียนถาวร',
+      cancelLabel: 'ยกเลิก',
+      danger: true,
+    });
+    if (!ok) return;
+
+    setDeletingSchoolId(sch.id);
+    try {
+      await deleteSchoolAdmin(sch, actor);
+      if (activeSchool?.id === sch.id) {
+        await setActiveSchoolById(null);
+        setPreviewPersona(null, null);
+      }
+      if (testInviteSchoolId === sch.id) {
+        setTestInviteSchoolId('');
+      }
+      if (demoResult?.schoolId === sch.id) {
+        setDemoResult(null);
+      }
+      await loadAllAdminData();
+      await refreshTenant();
+      showToast(`ลบโรงเรียน "${sch.nameTh}" เรียบร้อยแล้ว`, 'success');
+    } catch (err) {
+      showToast(formatErrorMessage(err), 'error');
+    } finally {
+      setDeletingSchoolId(null);
     }
   };
 
@@ -693,7 +729,28 @@ export function SuperAdminPage() {
                               <div className="font-bold text-slate-900">{sch.nameTh}</div>
                               <div className="font-mono text-slate-500">{sch.slug}</div>
                             </td>
-                            <td className="p-3.5 font-semibold">{sch.planId}</td>
+                            <td className="p-3.5 font-semibold">
+                              <select
+                                value={sch.planId}
+                                onChange={async (e) => {
+                                  const newPlanId = e.target.value;
+                                  try {
+                                    await updateSchoolLifecycleAdmin(sch, sch.subscriptionStatus, newPlanId, 0, actor);
+                                    await loadAllAdminData();
+                                    showToast(`เปลี่ยนแพ็กเกจของ ${sch.nameTh} เป็น ${newPlanId} แล้ว`, 'success');
+                                  } catch (err) {
+                                    showToast(formatErrorMessage(err), 'error');
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white font-semibold text-slate-800 focus:outline-none"
+                              >
+                                {plans.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name} ({p.nameTh})
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
                             <td className="p-3.5">{meta.label}</td>
                             <td className="p-3.5 text-right tabular-nums">
                               {days !== null ? `${days} วัน` : '-'}
@@ -735,6 +792,16 @@ export function SuperAdminPage() {
                                 className="px-2.5 py-1 bg-rose-600 text-white rounded-lg hover:bg-rose-700"
                               >
                                 {sch.subscriptionStatus === 'suspended' ? 'ปลดระงับ' : 'ระงับ'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={deletingSchoolId === sch.id}
+                                onClick={() => void handleDeleteSchool(sch)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-rose-300 text-rose-700 hover:bg-rose-50 rounded-lg font-semibold disabled:opacity-50"
+                                title="ลบโรงเรียนนี้ออกจากระบบถาวร"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>{deletingSchoolId === sch.id ? 'กำลังลบ...' : 'ลบโรงเรียน'}</span>
                               </button>
                             </td>
                           </tr>

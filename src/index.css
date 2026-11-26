@@ -80,8 +80,37 @@
   }
 }
 
+.font-sarabun {
+  font-family: 'Sarabun', 'Noto Sans Thai', sans-serif;
+}
+
+@page {
+  size: A4 landscape;
+  margin: 8mm;
+}
+
 @media print {
   .no-print {
     display: none !important;
+  }
+
+  body,
+  .pastel-ambient-bg {
+    background: #ffffff !important;
+    background-image: none !important;
+  }
+
+  .print-a4-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    page-break-after: always;
+  }
+
+  .print-a4-sheet:last-child {
+    page-break-after: auto;
   }
 }

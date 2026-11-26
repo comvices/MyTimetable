@@ -147,14 +147,14 @@ export function WorkspaceShell({
       {/* Mobile Sidebar Overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-xs lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-xs lg:hidden no-print"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-68 pastel-glass border-r flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`no-print fixed inset-y-0 left-0 z-50 w-68 pastel-glass border-r flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         style={{ borderColor: theme.border }}
@@ -333,7 +333,7 @@ export function WorkspaceShell({
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Top Bar */}
         <header
-          className="pastel-glass border-b px-4 sm:px-6 h-16 flex items-center justify-between gap-4 sticky top-0 z-30"
+          className="no-print pastel-glass border-b px-4 sm:px-6 h-16 flex items-center justify-between gap-4 sticky top-0 z-30"
           style={{ borderColor: theme.border }}
         >
           <div className="flex items-center gap-3 min-w-0">
@@ -400,7 +400,7 @@ export function WorkspaceShell({
         {/* Sample Persona Preview Banner */}
         {isSuperAdmin && school && previewRole && location.pathname !== '/super-admin' && (
           <div
-            className="border-b px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs"
+            className="no-print border-b px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs"
             style={{
               backgroundColor: theme.pastelSoft,
               borderColor: theme.border,
@@ -449,7 +449,7 @@ export function WorkspaceShell({
 
         {/* Lifecycle Banners */}
         {isReadOnly && school && (
-          <div className="bg-rose-50/90 border-b border-rose-200 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="no-print bg-rose-50/90 border-b border-rose-200 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 text-sm text-rose-900">
               <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
               <span>
@@ -467,7 +467,7 @@ export function WorkspaceShell({
         )}
 
         {!isReadOnly && showTrialWarning && (
-          <div className="bg-amber-50/90 border-b border-amber-200 px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="no-print bg-amber-50/90 border-b border-amber-200 px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 text-sm text-amber-900">
               <Clock className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
@@ -489,7 +489,7 @@ export function WorkspaceShell({
           initial={theme.effectsEnabled ? { opacity: 0, y: 8 } : false}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="flex-1 p-4 sm:p-6 max-w-[1440px] w-full mx-auto"
+          className="flex-1 p-4 sm:p-6 max-w-[1440px] w-full mx-auto print:p-0 print:max-w-none"
         >
           {children}
         </motion.main>

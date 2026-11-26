@@ -428,6 +428,85 @@ export async function updateSchoolLifecycleAdmin(
   }
 }
 
+const DELETABLE_SCHOOL_SUBCOLLECTIONS = [
+  'timetables',
+  'activities',
+  'timeSlots',
+  'rooms',
+  'classrooms',
+  'subjects',
+  'teachers',
+  'departments',
+  'academicYears',
+  'scheduleVersions',
+  'invites',
+  'members',
+] as const;
+
+export async function deleteSchoolAdmin(school: School, actor: ActorInfo): Promise<void> {
+  const path = `schools/${school.id}`;
+  try {
+    const ops: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+
+    const subSnaps = await Promise.all(
+      DELETABLE_SCHOOL_SUBCOLLECTIONS.map((colName) =>
+        getDocs(collection(db, 'schools', school.id, colName))
+      )
+    );
+    subSnaps.forEach((snap) => {
+      snap.docs.forEach((d) => {
+        ops.push((b) => b.delete(d.ref));
+      });
+    });
+
+    const [subsSnap, paysSnap, usersSnap] = await Promise.all([
+      getDocs(query(collection(db, 'subscriptions'), where('schoolId', '==', school.id))),
+      getDocs(query(collection(db, 'payments'), where('schoolId', '==', school.id))),
+      getDocs(query(collection(db, 'users'), where('schoolId', '==', school.id))),
+    ]);
+
+    subsSnap.docs.forEach((d) => {
+      ops.push((b) => b.delete(d.ref));
+    });
+
+    paysSnap.docs.forEach((d) => {
+      ops.push((b) => b.delete(d.ref));
+    });
+
+    usersSnap.docs.forEach((d) => {
+      ops.push((b) =>
+        b.update(d.ref, {
+          schoolId: '',
+          schoolSlug: '',
+          updatedAt: serverTimestamp(),
+        })
+      );
+    });
+
+    if (school.slug) {
+      ops.push((b) => b.delete(doc(db, 'schoolSlugs', school.slug)));
+    }
+    ops.push((b) => b.delete(doc(db, 'schools', school.id)));
+
+    for (let i = 0; i < ops.length; i += 400) {
+      const batch = writeBatch(db);
+      ops.slice(i, i + 400).forEach((fn) => fn(batch));
+      await batch.commit();
+    }
+
+    await writeAuditLog(
+      'platform',
+      actor,
+      'SCHOOL_DELETED',
+      'school',
+      school.id,
+      `Deleted school ${school.nameTh} (${school.slug})`
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
 export async function fetchAuditLogsAdmin(schoolId?: string): Promise<AuditLog[]> {
   const data = await fetchAdminOverview();
   if (schoolId) {
