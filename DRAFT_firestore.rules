@@ -40,8 +40,8 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isVerifiedUser() && (
-        request.auth.token.email == 'phratchayawit.sri@gmail.com' ||
+      return isSignedIn() && (
+        (isVerifiedUser() && request.auth.token.email == 'phratchayawit.sri@gmail.com') ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -54,8 +54,12 @@ service cloud.firestore {
       return /databases/$(database)/documents/schools/$(schoolId)/members/$(uid);
     }
 
+    function invitePath(schoolId, inviteId) {
+      return /databases/$(database)/documents/schools/$(schoolId)/invites/$(inviteId);
+    }
+
     function isSchoolMember(schoolId) {
-      return isVerifiedUser() &&
+      return isSignedIn() &&
         exists(memberPath(schoolId, request.auth.uid)) &&
         get(memberPath(schoolId, request.auth.uid)).data.status == 'active';
     }
@@ -191,9 +195,10 @@ service cloud.firestore {
 
     function isValidUserAccount(data) {
       return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'email', 'displayName', 'schoolId', 'schoolSlug', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'username', 'displayName', 'schoolId', 'schoolSlug', 'role', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
         isValidString(data.email, 3, 200) &&
+        (!('username' in data) || isValidString(data.username, 0, 64)) &&
         isValidString(data.displayName, 1, 150) &&
         (!('schoolId' in data) || isValidString(data.schoolId, 0, 128)) &&
         (!('schoolSlug' in data) || isValidString(data.schoolSlug, 0, 64)) &&
@@ -264,13 +269,31 @@ service cloud.firestore {
 
     function isValidSchoolMember(data) {
       return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'status', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'status', 'teacherId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'username', 'displayName', 'role', 'status', 'teacherId', 'inviteId', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
         isValidString(data.email, 3, 200) &&
+        (!('username' in data) || isValidString(data.username, 0, 64)) &&
         isValidString(data.displayName, 1, 150) &&
         data.role in ['school_admin', 'scheduler', 'teacher'] &&
         data.status in ['active', 'invited', 'disabled'] &&
         (!('teacherId' in data) || isValidString(data.teacherId, 0, 128)) &&
+        (!('inviteId' in data) || isValidString(data.inviteId, 0, 128)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSchoolInvite(data) {
+      return data.keys().hasAll(['id', 'schoolId', 'email', 'role', 'status', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'schoolId', 'email', 'username', 'role', 'teacherId', 'status', 'acceptedBy', 'createdBy', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.schoolId) &&
+        isValidString(data.email, 3, 200) &&
+        (!('username' in data) || isValidString(data.username, 0, 64)) &&
+        data.role in ['school_admin', 'scheduler', 'teacher'] &&
+        (!('teacherId' in data) || isValidString(data.teacherId, 0, 128)) &&
+        data.status in ['pending', 'accepted', 'revoked'] &&
+        (!('acceptedBy' in data) || isValidString(data.acceptedBy, 0, 128)) &&
+        isValidId(data.createdBy) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -432,7 +455,7 @@ service cloud.firestore {
     // Platform Collections
     // ---------------------------------------------------------
     match /admins/{uid} {
-      allow get: if isValidId(uid) && (isSuperAdmin() || (isVerifiedUser() && request.auth.uid == uid));
+      allow get: if isValidId(uid) && (isSuperAdmin() || (isSignedIn() && request.auth.uid == uid));
       allow list: if isSuperAdmin();
       allow create, update: if isValidId(uid) && isSuperAdmin() && isValidAdmin(incoming()) && incoming().uid == uid;
       allow delete: if isValidId(uid) && isSuperAdmin();
@@ -453,7 +476,7 @@ service cloud.firestore {
     }
 
     match /coupons/{couponId} {
-      allow get: if isValidId(couponId) && isVerifiedUser();
+      allow get: if isValidId(couponId) && isSignedIn();
       allow list: if isSuperAdmin();
       allow create: if isValidId(couponId) && isSuperAdmin() && isValidCoupon(incoming()) && incoming().createdAt == request.time;
       allow update: if isValidId(couponId) && isSuperAdmin() && isValidCoupon(incoming()) && incoming().createdAt == existing().createdAt;
@@ -463,7 +486,7 @@ service cloud.firestore {
     match /schoolSlugs/{slug} {
       allow get: if isValidSlug(slug);
       allow list: if false;
-      allow create: if isValidSlug(slug) && isVerifiedUser() &&
+      allow create: if isValidSlug(slug) && isSignedIn() &&
         isValidSchoolSlug(incoming()) &&
         incoming().slug == slug &&
         incoming().ownerUid == request.auth.uid &&
@@ -479,8 +502,8 @@ service cloud.firestore {
 
     match /schools/{schoolId} {
       allow get: if isValidId(schoolId) && (isSuperAdmin() || isSchoolMember(schoolId));
-      allow list: if isSuperAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isValidId(schoolId) && isVerifiedUser() &&
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isValidId(schoolId) && isSignedIn() &&
         isValidSchool(incoming()) &&
         incoming().id == schoolId &&
         incoming().ownerUid == request.auth.uid &&
@@ -513,7 +536,7 @@ service cloud.firestore {
       match /members/{memberUid} {
         allow get: if isValidId(schoolId) && isValidId(memberUid) && (
           isSuperAdmin() ||
-          (isVerifiedUser() && request.auth.uid == memberUid) ||
+          (isSignedIn() && request.auth.uid == memberUid) ||
           isSchoolMember(schoolId)
         );
         allow list: if isValidId(schoolId) && (isSuperAdmin() || isSchoolMember(schoolId));
@@ -523,7 +546,8 @@ service cloud.firestore {
           incoming().updatedAt == request.time &&
           (
             isSuperAdmin() ||
-            (isVerifiedUser() && request.auth.uid == memberUid && incoming().role == 'school_admin' && existsAfter(schoolPath(schoolId)) && getAfter(schoolPath(schoolId)).data.ownerUid == request.auth.uid) ||
+            (isSignedIn() && request.auth.uid == memberUid && incoming().role == 'school_admin' && existsAfter(schoolPath(schoolId)) && getAfter(schoolPath(schoolId)).data.ownerUid == request.auth.uid) ||
+            (isSignedIn() && request.auth.uid == memberUid && ('inviteId' in incoming()) && isValidId(incoming().inviteId) && exists(invitePath(schoolId, incoming().inviteId)) && get(invitePath(schoolId, incoming().inviteId)).data.email == request.auth.token.email && get(invitePath(schoolId, incoming().inviteId)).data.role == incoming().role && getAfter(invitePath(schoolId, incoming().inviteId)).data.status == 'accepted') ||
             (isSchoolAdmin(schoolId) && isSchoolWritable(schoolId))
           );
         allow update: if isValidId(schoolId) && isValidId(memberUid) && isValidSchoolMember(incoming()) &&
@@ -533,6 +557,36 @@ service cloud.firestore {
           (isSuperAdmin() || (isSchoolAdmin(schoolId) && isSchoolWritable(schoolId)));
         allow delete: if isValidId(schoolId) && isValidId(memberUid) && (
           isSuperAdmin() || (isSchoolAdmin(schoolId) && isSchoolWritable(schoolId) && memberUid != request.auth.uid)
+        );
+      }
+
+      match /invites/{inviteId} {
+        allow get: if isValidId(schoolId) && isValidId(inviteId) && (
+          isSuperAdmin() ||
+          isSchoolAdmin(schoolId) ||
+          (isSignedIn() && existing().status == 'pending' && existing().email == request.auth.token.email)
+        );
+        allow list: if isValidId(schoolId) && (isSuperAdmin() || isSchoolAdmin(schoolId));
+        allow create: if isValidId(schoolId) && isValidId(inviteId) && isValidSchoolInvite(incoming()) &&
+          incoming().id == inviteId &&
+          incoming().schoolId == schoolId &&
+          incoming().createdBy == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          (isSuperAdmin() || (isSchoolAdmin(schoolId) && isSchoolWritable(schoolId)));
+        allow update: if isValidId(schoolId) && isValidId(inviteId) && isValidSchoolInvite(incoming()) &&
+          incoming().id == existing().id &&
+          incoming().schoolId == existing().schoolId &&
+          incoming().createdBy == existing().createdBy &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            isSuperAdmin() ||
+            (isSchoolAdmin(schoolId) && isSchoolWritable(schoolId)) ||
+            (isSignedIn() && existing().status == 'pending' && existing().email == request.auth.token.email && incoming().status == 'accepted' && incoming().acceptedBy == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'acceptedBy', 'updatedAt']))
+          );
+        allow delete: if isValidId(schoolId) && isValidId(inviteId) && (
+          isSuperAdmin() || (isSchoolAdmin(schoolId) && isSchoolWritable(schoolId))
         );
       }
 
@@ -667,12 +721,12 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow get: if isValidId(uid) && (isSuperAdmin() || (isVerifiedUser() && request.auth.uid == uid));
+      allow get: if isValidId(uid) && (isSuperAdmin() || (isSignedIn() && request.auth.uid == uid));
       allow list: if isSuperAdmin();
-      allow create: if isValidId(uid) && isVerifiedUser() && request.auth.uid == uid &&
+      allow create: if isValidId(uid) && isSignedIn() && request.auth.uid == uid &&
         isValidUserAccount(incoming()) &&
         incoming().uid == uid &&
-        incoming().role in ['school_admin', 'scheduler', 'teacher'] &&
+        (isSuperAdmin() || incoming().role in ['school_admin', 'scheduler', 'teacher']) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isValidId(uid) && isValidUserAccount(incoming()) &&
@@ -682,9 +736,9 @@ service cloud.firestore {
         (
           isSuperAdmin() ||
           (
-            isVerifiedUser() && request.auth.uid == uid &&
+            isSignedIn() && request.auth.uid == uid &&
             incoming().role == existing().role &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'schoolId', 'schoolSlug', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'username', 'schoolId', 'schoolSlug', 'updatedAt'])
           )
         );
       allow delete: if isValidId(uid) && isSuperAdmin();
@@ -692,8 +746,8 @@ service cloud.firestore {
 
     match /subscriptions/{subscriptionId} {
       allow get: if isValidId(subscriptionId) && (isSuperAdmin() || isSchoolMember(existing().schoolId));
-      allow list: if isSuperAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isValidId(subscriptionId) && isVerifiedUser() &&
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isValidId(subscriptionId) && isSignedIn() &&
         isValidSubscription(incoming()) &&
         incoming().id == subscriptionId &&
         incoming().ownerUid == request.auth.uid &&
@@ -711,13 +765,15 @@ service cloud.firestore {
     }
 
     match /payments/{paymentId} {
-      allow get: if isValidId(paymentId) && (isSuperAdmin() || (isVerifiedUser() && existing().createdBy == request.auth.uid) || isSchoolAdmin(existing().schoolId));
-      allow list: if isSuperAdmin() || (isVerifiedUser() && resource.data.createdBy == request.auth.uid);
-      allow create: if isValidId(paymentId) && isVerifiedUser() &&
+      allow get: if isValidId(paymentId) && (isSuperAdmin() || (isSignedIn() && existing().createdBy == request.auth.uid) || isSchoolAdmin(existing().schoolId));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.createdBy == request.auth.uid);
+      allow create: if isValidId(paymentId) && isSignedIn() &&
         isValidPayment(incoming()) &&
         incoming().id == paymentId &&
         incoming().createdBy == request.auth.uid &&
+        incoming().method == 'bank_transfer' &&
         incoming().status == 'pending_verification' &&
+        !('verifiedBy' in incoming()) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         isSchoolAdmin(incoming().schoolId);
@@ -734,8 +790,8 @@ service cloud.firestore {
 
     match /auditLogs/{logId} {
       allow get: if isValidId(logId) && (isSuperAdmin() || isSchoolAdmin(existing().schoolId));
-      allow list: if isSuperAdmin() || (isVerifiedUser() && resource.data.actorUid == request.auth.uid);
-      allow create: if isValidId(logId) && isVerifiedUser() &&
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.actorUid == request.auth.uid);
+      allow create: if isValidId(logId) && isSignedIn() &&
         isValidAuditLog(incoming()) &&
         incoming().id == logId &&
         incoming().actorUid == request.auth.uid &&

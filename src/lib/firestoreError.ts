@@ -68,11 +68,27 @@ export function formatErrorMessage(error: unknown): string {
     if (error.message.includes('Missing or insufficient permissions')) {
       return 'ไม่มีสิทธิ์เข้าถึงข้อมูล หรือโรงเรียนอยู่ในสถานะหมดอายุ (Read-only)';
     }
-    if (error.message.includes('auth/popup-closed-by-user')) {
-      return 'คุณปิดหน้าต่างเข้าสู่ระบบ Google ก่อนเสร็จสิ้น';
+    if (
+      error.message.includes('auth/invalid-credential') ||
+      error.message.includes('auth/wrong-password') ||
+      error.message.includes('auth/user-not-found')
+    ) {
+      return 'ชื่อผู้ใช้งาน (Username) หรือรหัสผ่านไม่ถูกต้อง';
     }
-    if (error.message.includes('auth/popup-blocked')) {
-      return 'เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป กรุณาอนุญาตป๊อปอัปแล้วลองใหม่อีกครั้ง';
+    if (error.message.includes('auth/email-already-in-use')) {
+      return 'ชื่อผู้ใช้งาน (Username) นี้ถูกใช้งานแล้ว กรุณาเลือกชื่ออื่น';
+    }
+    if (error.message.includes('auth/weak-password')) {
+      return 'รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร';
+    }
+    if (error.message.includes('auth/operation-not-allowed')) {
+      return 'กรุณาเปิดใช้งาน Email/Password ใน Firebase Console > Authentication > Sign-in method ก่อนเข้าใช้งาน';
+    }
+    if (error.message.includes('auth/too-many-requests')) {
+      return 'ลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง';
+    }
+    if (error.message.includes('auth/invalid-email')) {
+      return 'รูปแบบชื่อผู้ใช้งาน (Username) ไม่ถูกต้อง';
     }
     if (error.message.includes('auth/unauthorized-domain')) {
       return 'โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Authentication (Authorized domains)';

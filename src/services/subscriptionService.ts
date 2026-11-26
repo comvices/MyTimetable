@@ -13,6 +13,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
+import { extractUsername } from '../lib/authIdentifier';
 import { auth, db } from '../lib/firebase';
 import { OperationType, handleFirestoreError } from '../lib/firestoreError';
 import { generateId } from '../lib/tenant';
@@ -107,52 +108,6 @@ export async function submitBankTransferPayment(
   }
 }
 
-export async function initiateAndVerifyGatewayPayment(
-  input: {
-    school: School;
-    plan: Plan;
-    amount: number;
-    discountAmount: number;
-    couponCode?: string;
-  },
-  actor: ActorInfo
-): Promise<{ paymentId: string; sessionId: string; gatewaySignature: string }> {
-  const paymentId = generateId('paygw');
-  const sessionId = generateId('sess');
-  const gatewaySignature = `sig_${generateId('gw')}`;
-  const path = `payments/${paymentId}`;
-
-  try {
-    await setDoc(doc(db, 'payments', paymentId), {
-      id: paymentId,
-      schoolId: input.school.id,
-      schoolName: input.school.nameTh.slice(0, 200),
-      planId: input.plan.id,
-      amount: Math.max(0, input.amount),
-      discountAmount: Math.max(0, input.discountAmount),
-      couponCode: (input.couponCode || '').slice(0, 40),
-      method: 'gateway',
-      status: 'pending_verification',
-      gatewaySessionId: sessionId,
-      gatewaySignature,
-      createdBy: actor.uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    await writeAuditLog(
-      input.school.id,
-      actor,
-      'PAYMENT_GATEWAY_SUBMITTED',
-      'payment',
-      paymentId,
-      `Submitted gateway session ${sessionId} for ฿${input.amount}`
-    );
-    return { paymentId, sessionId, gatewaySignature };
-  } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, path);
-  }
-}
-
 export async function fetchSchoolPayments(
   schoolId: string,
   isSuperAdmin = false
@@ -219,7 +174,7 @@ export async function fetchAdminOverview(): Promise<AdminOverviewPayload> {
         const u = d.data() as UserAccount;
         return {
           uid: u.uid,
-          username: u.email.split('@')[0] || u.uid,
+          username: u.username || extractUsername(u.email) || u.uid,
           email: u.email,
           displayName: u.displayName,
           role: u.role,
@@ -231,7 +186,7 @@ export async function fetchAdminOverview(): Promise<AdminOverviewPayload> {
         const a = d.data() as { uid: string; email: string };
         return {
           uid: a.uid,
-          username: a.email.split('@')[0] || a.uid,
+          username: extractUsername(a.email) || a.uid,
           email: a.email,
         };
       }),
@@ -371,7 +326,13 @@ export async function approvePaymentAndActivateSchool(
 ): Promise<void> {
   const path = `payments/${payment.id}`;
   try {
-    const newPeriodEnd = Timestamp.fromDate(new Date(Date.now() + 365 * 86400000));
+    const schoolSnap = await getDoc(doc(db, 'schools', payment.schoolId));
+    const existingSchool = schoolSnap.exists() ? (schoolSnap.data() as School) : null;
+    const baseMs = Math.max(
+      Date.now(),
+      existingSchool?.currentPeriodEnd?.toMillis() || 0
+    );
+    const newPeriodEnd = Timestamp.fromDate(new Date(baseMs + 365 * 86400000));
     const batch = writeBatch(db);
 
     batch.update(doc(db, 'payments', payment.id), {
@@ -394,7 +355,7 @@ export async function approvePaymentAndActivateSchool(
       'PAYMENT_APPROVED',
       'payment',
       payment.id,
-      `Approved payment ฿${payment.amount} and activated plan ${payment.planId}`
+      `Admin approved renewal ฿${payment.amount} and activated plan ${payment.planId}`
     );
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, path);

@@ -1,4 +1,5 @@
 import { Timestamp, doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { extractUsername } from '../lib/authIdentifier';
 import { db } from '../lib/firebase';
 import { OperationType, handleFirestoreError } from '../lib/firestoreError';
 import { generateId, sanitizeSlug } from '../lib/tenant';
@@ -347,7 +348,8 @@ export async function createDemoSchoolAndSampleUsers(
   batch.set(doc(db, 'schools', schoolId, 'members', actor.uid), {
     uid: actor.uid,
     email: actor.email || '',
-    displayName: actor.displayName || actor.email || 'ผู้ดูแลโรงเรียน',
+    username: actor.username || extractUsername(actor.email || ''),
+    displayName: actor.displayName || actor.username || actor.email || 'ผู้ดูแลโรงเรียน',
     role: 'school_admin',
     status: 'active',
     createdAt: serverTimestamp(),

@@ -367,7 +367,7 @@ export function LandingPricingPage() {
             แพ็กเกจสมาชิกรายปีสำหรับทุกขนาดโรงเรียน
           </h2>
           <p className="mt-2 text-slate-600">
-            เริ่มต้นทดลองใช้งานฟรี {platformSettings.trialDays} วัน รองรับทั้งโอนเงินแนบสลิปและ Payment Gateway
+            เริ่มต้นทดลองใช้งานฟรี {platformSettings.trialDays} วัน ต่ออายุด้วยการโอนเงินแนบสลิปและอนุมัติโดยผู้ดูแลระบบเท่านั้น
           </p>
         </div>
 

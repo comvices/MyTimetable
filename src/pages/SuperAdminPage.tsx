@@ -38,6 +38,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
+import { extractUsername } from '../lib/authIdentifier';
 import { formatErrorMessage } from '../lib/firestoreError';
 import { getDaysRemaining, getSubscriptionStatusLabel } from '../lib/tenant';
 import {
@@ -65,6 +66,7 @@ import {
   Plan,
   PlatformSettings,
   SUPER_ADMIN_EMAIL,
+  SUPER_ADMIN_USERNAME,
   School,
   SubscriptionStatus,
 } from '../types/saas';
@@ -218,11 +220,13 @@ export function SuperAdminPage() {
   const actor = {
     uid: currentUser.uid,
     email: currentUser.email || '',
-    displayName: currentUser.displayName || currentUser.email,
+    username: currentUser.username || extractUsername(currentUser.email || ''),
+    displayName: currentUser.displayName || currentUser.username || currentUser.email,
   };
 
   const isPrimaryOwner =
-    currentUser.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+    currentUser.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ||
+    (currentUser.username || '').toLowerCase() === SUPER_ADMIN_USERNAME.toLowerCase();
 
   const adminUidSet = new Set(adminRegistry.map((a) => a.uid));
 
@@ -276,7 +280,7 @@ export function SuperAdminPage() {
       return;
     }
     if (!testInviteEmail.trim()) {
-      showToast('กรุณากรอกอีเมลสำหรับรับคำเชิญ', 'warning');
+      showToast('กรุณากรอก Username สำหรับรับคำเชิญ', 'warning');
       return;
     }
     const targetSchool = schools.find((s) => s.id === targetSchoolId);
@@ -311,7 +315,7 @@ export function SuperAdminPage() {
   return (
     <WorkspaceShell
       title="Super Admin Console — เจ้าของและผู้ดูแลระบบหลัก"
-      breadcrumb={`Platform Control Center · ${currentUser.email}`}
+      breadcrumb={`Platform Control Center · @${actor.username}`}
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -375,8 +379,8 @@ export function SuperAdminPage() {
               </span>
             </div>
             <div className="text-xs text-slate-600 truncate">
-              บัญชีควบคุมหลัก: <span className="font-mono font-semibold">{currentUser.email}</span> ·
-              เข้าถึงได้ทุกโรงเรียน ตรวจสอบสลิป ควบคุมสถานะแพ็กเกจ และสร้างลิงก์เชิญผ่าน Cloud Firestore
+              บัญชีควบคุมหลัก: <span className="font-mono font-semibold">@{actor.username}</span> ·
+              เข้าถึงได้ทุกโรงเรียน ตรวจสอบสลิป อนุมัติการต่ออายุ และสร้างลิงก์เชิญผ่าน Cloud Firestore
             </div>
           </div>
         </div>
@@ -561,7 +565,7 @@ export function SuperAdminPage() {
                     <tr key={pay.id} className="border-b border-slate-100 last:border-b-0 hover:bg-white/60">
                       <td className="p-3.5 font-semibold text-slate-900">{pay.schoolName || pay.schoolId}</td>
                       <td className="p-3.5">
-                        {pay.planId} · {pay.method === 'bank_transfer' ? 'โอนเงิน' : 'Gateway'}
+                        {pay.planId} · {pay.method === 'bank_transfer' ? 'โอนเงินแนบสลิป (รออนุมัติแอดมิน)' : 'คำขอต่ออายุ'}
                       </td>
                       <td className="p-3.5 text-right tabular-nums font-bold">฿{pay.amount.toLocaleString()}</td>
                       <td className="p-3.5">
@@ -577,7 +581,7 @@ export function SuperAdminPage() {
                           </button>
                         ) : (
                           <span className="font-mono text-slate-500">
-                            {pay.gatewaySessionId || pay.transferReference || '-'}
+                            {pay.transferReference || pay.gatewaySessionId || '-'}
                           </span>
                         )}
                       </td>
@@ -586,7 +590,7 @@ export function SuperAdminPage() {
                           ? 'อนุมัติแล้ว'
                           : pay.status === 'rejected'
                           ? 'ปฏิเสธแล้ว'
-                          : 'รอตรวจสอบ'}
+                          : 'รออนุมัติจากแอดมิน'}
                       </td>
                       <td className="p-3.5 text-right space-x-2">
                         {pay.status === 'pending_verification' && (
@@ -596,11 +600,11 @@ export function SuperAdminPage() {
                               onClick={async () => {
                                 await approvePaymentAndActivateSchool(pay, actor);
                                 await loadAllAdminData();
-                                showToast('อนุมัติการชำระเงินและเปิดใช้งานสมาชิก 1 ปีแล้ว', 'success');
+                                showToast('อนุมัติการต่ออายุและเปิดใช้งานสมาชิก +1 ปีแล้ว', 'success');
                               }}
                               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold"
                             >
-                              อนุมัติ
+                              อนุมัติต่ออายุ
                             </button>
                             <button
                               type="button"
@@ -1120,7 +1124,7 @@ export function SuperAdminPage() {
                         3. ผู้ดูแลโรงเรียน (School Admin)
                       </div>
                       <div className="text-[11px] font-mono text-slate-500 mt-0.5">
-                        {currentUser.email} · Role: school_admin
+                        @{actor.username} · Role: school_admin
                       </div>
                       <p className="text-xs text-slate-600 mt-1.5">
                         จัดการข้อมูลครู วิชา ห้องเรียน ปรับแต่งอัตลักษณ์โรงเรียน เชิญสมาชิก และจัดตารางสอนได้ทั้งหมด
@@ -1147,7 +1151,7 @@ export function SuperAdminPage() {
               </div>
             )}
 
-            {/* Invite user by Google Email */}
+            {/* Invite user by Username */}
             <form
               onSubmit={handleCreateTestInvite}
               className="rounded-2xl border bg-white/80 p-4 space-y-3"
@@ -1155,7 +1159,7 @@ export function SuperAdminPage() {
             >
               <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
                 <UserPlus className="w-4 h-4" style={{ color: theme.primary }} />
-                <span>สร้างลิงก์เชิญเข้าร่วมโรงเรียนด้วยบัญชี Google (Email)</span>
+                <span>สร้างลิงก์เชิญเข้าร่วมโรงเรียนด้วย Username</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                 <div className="md:col-span-4">
@@ -1175,13 +1179,13 @@ export function SuperAdminPage() {
                 </div>
                 <div className="md:col-span-4">
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    อีเมล Google ผู้รับเชิญ
+                    Username ผู้รับเชิญ
                   </label>
                   <input
-                    type="email"
+                    type="text"
                     value={testInviteEmail}
                     onChange={(e) => setTestInviteEmail(e.target.value)}
-                    placeholder="teacher@gmail.com"
+                    placeholder="เช่น teacher01"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
                     required
                   />
@@ -1242,7 +1246,7 @@ export function SuperAdminPage() {
               <div>
                 <h2 className="text-sm font-bold text-slate-900">สิทธิ์เจ้าของและผู้ดูแลระบบหลัก</h2>
                 <p className="text-xs text-slate-600">
-                  เจ้าของแพลตฟอร์ม ({SUPER_ADMIN_EMAIL}) มีสิทธิ์ถาวรและไม่สามารถถูกถอนสิทธิ์ได้ คุณสามารถมอบหรือถอนสิทธิ์ผู้ดูแลระบบให้บัญชีอื่นด้านล่าง
+                  เจ้าของแพลตฟอร์ม (@{SUPER_ADMIN_USERNAME}) มีสิทธิ์ถาวรและไม่สามารถถูกถอนสิทธิ์ได้ คุณสามารถมอบหรือถอนสิทธิ์ผู้ดูแลระบบให้บัญชีอื่นด้านล่าง
                 </p>
               </div>
             </div>
@@ -1252,7 +1256,7 @@ export function SuperAdminPage() {
                 type="text"
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="ค้นหาชื่อหรืออีเมล..."
+                placeholder="ค้นหาชื่อหรือ Username..."
                 className="w-full pl-9 pr-3 py-2 rounded-xl border bg-white text-xs focus:outline-none"
                 style={{ borderColor: theme.border }}
               />
@@ -1271,7 +1275,7 @@ export function SuperAdminPage() {
                 >
                   <tr>
                     <th className="p-3.5 text-left">ชื่อผู้ใช้งาน</th>
-                    <th className="p-3.5 text-left">อีเมล</th>
+                    <th className="p-3.5 text-left">Username</th>
                     <th className="p-3.5 text-left">โรงเรียน</th>
                     <th className="p-3.5 text-left">บทบาท</th>
                     <th className="p-3.5 text-right">จัดการสิทธิ์ Super Admin</th>
@@ -1279,14 +1283,17 @@ export function SuperAdminPage() {
                 </thead>
                 <tbody>
                   {platformUsers
-                    .filter((u) =>
-                      `${u.displayName} ${u.email} ${u.schoolSlug || ''}`
+                    .filter((u) => {
+                      const uname = u.username || extractUsername(u.email);
+                      return `${u.displayName} ${uname} ${u.email} ${u.schoolSlug || ''}`
                         .toLowerCase()
-                        .includes(userSearch.trim().toLowerCase())
-                    )
+                        .includes(userSearch.trim().toLowerCase());
+                    })
                     .map((u) => {
+                      const uname = u.username || extractUsername(u.email);
                       const isOwnerAccount =
-                        u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
+                        u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ||
+                        uname.toLowerCase() === SUPER_ADMIN_USERNAME.toLowerCase();
                       const isAdmin = isOwnerAccount || adminUidSet.has(u.uid) || u.role === 'super_admin';
                       return (
                         <tr key={u.uid} className="border-b border-slate-100 last:border-b-0 hover:bg-white/60">
@@ -1296,7 +1303,7 @@ export function SuperAdminPage() {
                               {u.displayName || '-'}
                             </span>
                           </td>
-                          <td className="p-3.5 font-mono text-slate-700">{u.email}</td>
+                          <td className="p-3.5 font-mono text-slate-700">@{uname}</td>
                           <td className="p-3.5 font-mono text-slate-500">{u.schoolSlug || '-'}</td>
                           <td className="p-3.5">
                             {isOwnerAccount ? (
@@ -1321,14 +1328,14 @@ export function SuperAdminPage() {
                                 onClick={async () => {
                                   const ok = await confirmAction({
                                     title: 'ถอนสิทธิ์ผู้ดูแลระบบ?',
-                                    description: `ต้องการถอนสิทธิ์ Super Admin ของ ${u.email} หรือไม่`,
+                                    description: `ต้องการถอนสิทธิ์ Super Admin ของ @${uname} หรือไม่`,
                                     danger: true,
                                   });
                                   if (!ok) return;
                                   try {
                                     await revokeSuperAdminAccess({ uid: u.uid, email: u.email }, actor);
                                     await loadAllAdminData();
-                                    showToast(`ถอนสิทธิ์ Super Admin ของ ${u.email} แล้ว`, 'info');
+                                    showToast(`ถอนสิทธิ์ Super Admin ของ @${uname} แล้ว`, 'info');
                                   } catch (err) {
                                     showToast(formatErrorMessage(err), 'error');
                                   }
@@ -1344,13 +1351,13 @@ export function SuperAdminPage() {
                                 onClick={async () => {
                                   const ok = await confirmAction({
                                     title: 'มอบสิทธิ์ผู้ดูแลระบบหลัก?',
-                                    description: `บัญชี ${u.email} จะสามารถจัดการทุกโรงเรียน อนุมัติสลิป และตั้งค่าแพลตฟอร์มได้`,
+                                    description: `บัญชี @${uname} จะสามารถจัดการทุกโรงเรียน อนุมัติต่ออายุ และตั้งค่าแพลตฟอร์มได้`,
                                   });
                                   if (!ok) return;
                                   try {
                                     await grantSuperAdminAccess({ uid: u.uid, email: u.email }, actor);
                                     await loadAllAdminData();
-                                    showToast(`มอบสิทธิ์ Super Admin แก่ ${u.email} แล้ว`, 'success');
+                                    showToast(`มอบสิทธิ์ Super Admin แก่ @${uname} แล้ว`, 'success');
                                   } catch (err) {
                                     showToast(formatErrorMessage(err), 'error');
                                   }
@@ -1430,7 +1437,7 @@ export function SuperAdminPage() {
             )}
             <div className="text-xs text-slate-600 space-y-1">
               <div>ยอดชำระ: ฿{slipModal.amount.toLocaleString()} · แพ็กเกจ {slipModal.planId}</div>
-              <div>อ้างอิง: {slipModal.transferReference || slipModal.gatewaySessionId || '-'}</div>
+              <div>อ้างอิงการโอน: {slipModal.transferReference || slipModal.gatewaySessionId || '-'}</div>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -1448,8 +1455,8 @@ export function SuperAdminPage() {
                 type="button"
                 onClick={async () => {
                   const ok = await confirmAction({
-                    title: 'ปฏิเสธหลักฐานการชำระเงิน?',
-                    description: 'รายการนี้จะถูกเปลี่ยนสถานะเป็นปฏิเสธ',
+                    title: 'ปฏิเสธคำขอต่ออายุ?',
+                    description: 'รายการนี้จะถูกเปลี่ยนสถานะเป็นปฏิเสธ และวันใช้งานจะไม่ถูกต่ออายุ',
                     danger: true,
                   });
                   if (ok) {
@@ -1474,12 +1481,12 @@ export function SuperAdminPage() {
                   await approvePaymentAndActivateSchool(slipModal, actor);
                   setSlipModal(null);
                   await loadAllAdminData();
-                  showToast('อนุมัติการชำระเงินและเปิดใช้งานสมาชิกแล้ว', 'success');
+                  showToast('อนุมัติการต่ออายุและเปิดใช้งานสมาชิก +1 ปีแล้ว', 'success');
                 }}
                 className="inline-flex items-center gap-1 px-4 py-2 bg-emerald-600 text-white text-xs font-semibold rounded-xl"
               >
                 <Check className="w-3.5 h-3.5" />
-                อนุมัติ & เปิดใช้งาน 1 ปี
+                อนุมัติการต่ออายุ +1 ปี
               </button>
             </div>
           </div>

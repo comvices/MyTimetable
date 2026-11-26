@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building, CheckCircle2, CreditCard, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
+import { Building, CheckCircle2, Clock, ShieldCheck, Sparkles, Upload, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { WorkspaceShell } from '../components/layout/WorkspaceShell';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,7 +10,6 @@ import { formatErrorMessage } from '../lib/firestoreError';
 import { getSubscriptionStatusLabel } from '../lib/tenant';
 import {
   fetchSchoolPayments,
-  initiateAndVerifyGatewayPayment,
   submitBankTransferPayment,
   uploadPaymentSlip,
   validateCouponCode,
@@ -24,7 +23,6 @@ export function BillingPage() {
   const { showToast } = useToast();
 
   const [selectedPlan, setSelectedPlan] = useState<Plan>(currentPlan);
-  const [method, setMethod] = useState<'bank_transfer' | 'gateway'>('bank_transfer');
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [slipPreview, setSlipPreview] = useState('');
@@ -59,13 +57,15 @@ export function BillingPage() {
   const actor = {
     uid: currentUser.uid,
     email: currentUser.email || '',
-    displayName: currentUser.displayName || currentUser.email,
+    username: currentUser.username || '',
+    displayName: currentUser.displayName || currentUser.username || currentUser.email,
   };
 
   const discountAmount = appliedCoupon
     ? Math.round((selectedPlan.priceAnnual * appliedCoupon.discountPercent) / 100)
     : 0;
   const finalAmount = Math.max(0, selectedPlan.priceAnnual - discountAmount);
+  const pendingRenewalCount = payments.filter((p) => p.status === 'pending_verification').length;
 
   const handleApplyCoupon = async () => {
     const found = await validateCouponCode(couponInput);
@@ -134,33 +134,7 @@ export function BillingPage() {
         refreshTenant(),
       ]);
       setPayments(updated);
-      showToast('ส่งหลักฐานการโอนเงินแล้ว รอ Super Admin ตรวจสอบอนุมัติ', 'success');
-    } catch (err) {
-      showToast(formatErrorMessage(err), 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleGatewayCheckout = async () => {
-    setSubmitting(true);
-    try {
-      const res = await initiateAndVerifyGatewayPayment(
-        {
-          school,
-          plan: selectedPlan,
-          amount: finalAmount,
-          discountAmount,
-          couponCode: appliedCoupon?.code,
-        },
-        actor
-      );
-      const [updated] = await Promise.all([
-        fetchSchoolPayments(school.id, isSuperAdmin),
-        refreshTenant(),
-      ]);
-      setPayments(updated);
-      showToast(`สร้างรายการชำระเงิน Session ${res.sessionId} แล้ว รอยืนยันสถานะ`, 'success');
+      showToast('ส่งคำขอต่ออายุแล้ว กรุณารอผู้ดูแลระบบ (Admin) ตรวจสอบและอนุมัติ', 'success');
     } catch (err) {
       showToast(formatErrorMessage(err), 'error');
     } finally {
@@ -204,12 +178,23 @@ export function BillingPage() {
             </div>
           </div>
           <div
-            className="px-4 py-2.5 rounded-xl border text-xs text-slate-600"
+            className="px-4 py-2.5 rounded-xl border text-xs text-slate-700 flex items-center gap-2"
             style={{ backgroundColor: theme.pastelSoft, borderColor: theme.border }}
           >
-            หมายเหตุ: เมื่อหมดอายุข้อมูลโรงเรียนจะไม่ถูกลบ แต่จะเข้าสู่โหมดอ่านอย่างเดียวจนกว่าจะต่ออายุ
+            <ShieldCheck className="w-4 h-4 shrink-0" style={{ color: theme.primary }} />
+            <span>การต่ออายุแพ็กเกจต้องได้รับการตรวจสอบและอนุมัติจากผู้ดูแลระบบ (Admin) เท่านั้น</span>
           </div>
         </div>
+
+        {pendingRenewalCount > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/90 p-4 flex items-center gap-3 text-xs text-amber-900">
+            <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              ขณะนี้มีคำขอต่ออายุรอผู้ดูแลระบบตรวจสอบ <strong>{pendingRenewalCount}</strong> รายการ
+              ระบบจะเพิ่มวันใช้งานให้อัตโนมัติทันทีที่ผู้ดูแลระบบกดอนุมัติ
+            </span>
+          </div>
+        )}
 
         {/* Select Plan */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -243,152 +228,101 @@ export function BillingPage() {
           })}
         </div>
 
-        {/* Checkout Panel */}
+        {/* Renewal Request Panel (Admin Approval Only) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div
             className="lg:col-span-7 pastel-glass border rounded-2xl p-6 space-y-5"
             style={{ borderColor: theme.border }}
           >
-            <div
-              className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-xl border w-fit"
-              style={{ backgroundColor: theme.pastelSoft, borderColor: theme.border }}
-            >
-              <button
-                type="button"
-                onClick={() => setMethod('bank_transfer')}
-                className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap ${
-                  method === 'bank_transfer' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                style={method === 'bank_transfer' ? { color: theme.primary } : undefined}
-              >
-                <Building className="w-4 h-4" />
-                โอนเงินผ่านธนาคาร (แนบสลิป)
-              </button>
-              <button
-                type="button"
-                onClick={() => setMethod('gateway')}
-                className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap ${
-                  method === 'gateway' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-                style={method === 'gateway' ? { color: theme.primary } : undefined}
-              >
-                <CreditCard className="w-4 h-4" />
-                Payment Gateway
-              </button>
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+              <Building className="w-4 h-4" style={{ color: theme.primary }} />
+              <span>ส่งคำขอต่ออายุสมาชิก (โอนเงินแนบสลิป · รอ Admin อนุมัติ)</span>
             </div>
 
-            {method === 'bank_transfer' ? (
-              <form onSubmit={handleBankSubmit} className="space-y-4">
-                <div
-                  className="p-4 rounded-xl border text-xs space-y-1"
-                  style={{ backgroundColor: theme.pastelSoft, borderColor: theme.border }}
-                >
-                  <div className="font-bold text-slate-900">{platformSettings.bankName}</div>
-                  <div>ชื่อบัญชี: {platformSettings.bankAccountName}</div>
-                  <div className="font-mono text-sm font-bold text-slate-900">
-                    เลขที่บัญชี: {platformSettings.bankAccountNumber}
-                  </div>
-                  {platformSettings.promptPayId && (
-                    <div className="font-mono text-slate-700">
-                      PromptPay ID: {platformSettings.promptPayId}
-                    </div>
-                  )}
+            <form onSubmit={handleBankSubmit} className="space-y-4">
+              <div
+                className="p-4 rounded-xl border text-xs space-y-1"
+                style={{ backgroundColor: theme.pastelSoft, borderColor: theme.border }}
+              >
+                <div className="font-bold text-slate-900">{platformSettings.bankName}</div>
+                <div>ชื่อบัญชี: {platformSettings.bankAccountName}</div>
+                <div className="font-mono text-sm font-bold text-slate-900">
+                  เลขที่บัญชี: {platformSettings.bankAccountNumber}
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">วัน-เวลาที่โอน</label>
-                    <input
-                      type="datetime-local"
-                      value={transferDate}
-                      onChange={(e) => setTransferDate(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
-                      required
-                    />
+                {platformSettings.promptPayId && (
+                  <div className="font-mono text-slate-700">
+                    PromptPay ID: {platformSettings.promptPayId}
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      เลขอ้างอิงสลิป *
-                    </label>
-                    <input
-                      type="text"
-                      value={transferRef}
-                      onChange={(e) => setTransferRef(e.target.value)}
-                      placeholder="เช่น REF20261121"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    แนบภาพสลิปโอนเงิน *
-                  </label>
-                  <label
-                    className="flex flex-col items-center justify-center p-5 border-2 border-dashed rounded-xl cursor-pointer hover:bg-white/70 transition-colors"
-                    style={{ borderColor: theme.border }}
-                  >
-                    {slipPreview ? (
-                      <img src={slipPreview} alt="Slip preview" className="max-h-48 rounded-lg" />
-                    ) : (
-                      <>
-                        <Upload className="w-6 h-6 text-slate-400 mb-1.5" />
-                        <span className="text-xs text-slate-600">คลิกเพื่อเลือกไฟล์สลิป (PNG, JPG, WebP)</span>
-                      </>
-                    )}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) handleSlipFile(f);
-                      }}
-                    />
-                  </label>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full py-2.5 px-4 text-white text-sm font-semibold rounded-xl shadow-xs hover:opacity-95 disabled:opacity-50"
-                  style={{
-                    background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
-                  }}
-                >
-                  {submitting ? 'กำลังอัปโหลดหลักฐาน...' : `แจ้งชำระเงิน ฿${finalAmount.toLocaleString()}`}
-                </button>
-              </form>
-            ) : (
-              <div className="space-y-4">
-                <div
-                  className="p-4 rounded-xl border text-xs text-slate-700 space-y-2"
-                  style={{ backgroundColor: theme.pastelSoft, borderColor: theme.border }}
-                >
-                  <div className="flex items-center gap-2 font-bold text-slate-900">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                    การชำระเงินผ่าน Payment Gateway พร้อมตรวจสอบลายเซ็น Webhook
-                  </div>
-                  <p>
-                    ระบบจะสร้าง Payment Session ฝั่ง Backend พร้อมตรวจสอบลายเซ็น HMAC-SHA256 และป้องกัน Webhook ซ้ำโดยไม่เชื่อถือข้อมูลจาก Frontend เพียงอย่างเดียว
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleGatewayCheckout()}
-                  disabled={submitting}
-                  className="w-full py-2.5 px-4 text-white text-sm font-semibold rounded-xl shadow-xs hover:opacity-95 disabled:opacity-50"
-                  style={{
-                    background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
-                  }}
-                >
-                  {submitting
-                    ? 'กำลังเชื่อมต่อ Payment Gateway...'
-                    : `ชำระเงินออนไลน์ ฿${finalAmount.toLocaleString()}`}
-                </button>
+                )}
               </div>
-            )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">วัน-เวลาที่โอน</label>
+                  <input
+                    type="datetime-local"
+                    value={transferDate}
+                    onChange={(e) => setTransferDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    เลขอ้างอิงสลิป *
+                  </label>
+                  <input
+                    type="text"
+                    value={transferRef}
+                    onChange={(e) => setTransferRef(e.target.value)}
+                    placeholder="เช่น REF20261121"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  แนบภาพสลิปโอนเงิน *
+                </label>
+                <label
+                  className="flex flex-col items-center justify-center p-5 border-2 border-dashed rounded-xl cursor-pointer hover:bg-white/70 transition-colors"
+                  style={{ borderColor: theme.border }}
+                >
+                  {slipPreview ? (
+                    <img src={slipPreview} alt="Slip preview" className="max-h-48 rounded-lg" />
+                  ) : (
+                    <>
+                      <Upload className="w-6 h-6 text-slate-400 mb-1.5" />
+                      <span className="text-xs text-slate-600">คลิกเพื่อเลือกไฟล์สลิป (PNG, JPG, WebP)</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleSlipFile(f);
+                    }}
+                  />
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full py-2.5 px-4 text-white text-sm font-semibold rounded-xl shadow-xs hover:opacity-95 disabled:opacity-50"
+                style={{
+                  background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
+                }}
+              >
+                {submitting
+                  ? 'กำลังส่งคำขอต่ออายุ...'
+                  : `ส่งคำขอต่ออายุเพื่อรอ Admin อนุมัติ (฿${finalAmount.toLocaleString()})`}
+              </button>
+            </form>
           </div>
 
           {/* Order Summary + Coupon */}
@@ -396,7 +330,7 @@ export function BillingPage() {
             className="lg:col-span-5 pastel-glass border rounded-2xl p-6 space-y-4 h-fit"
             style={{ borderColor: theme.border }}
           >
-            <h3 className="text-base font-bold text-slate-900">สรุปยอดชำระรายปี</h3>
+            <h3 className="text-base font-bold text-slate-900">สรุปยอดต่ออายุรายปี</h3>
 
             <div className="flex gap-2">
               <input
@@ -446,6 +380,10 @@ export function BillingPage() {
                 <span className="tabular-nums">฿{finalAmount.toLocaleString()}</span>
               </div>
             </div>
+
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed">
+              หมายเหตุ: การเปิดใช้งานหรือต่ออายุแพ็กเกจจะมีผลหลังจากผู้ดูแลระบบ (Super Admin) ตรวจสอบหลักฐานและกดอนุมัติเท่านั้น เมื่อหมดอายุข้อมูลโรงเรียนจะไม่ถูกลบ แต่จะเข้าสู่โหมดอ่านอย่างเดียวชั่วคราว
+            </div>
           </div>
         </div>
 
@@ -458,10 +396,10 @@ export function BillingPage() {
             className="px-6 py-4 border-b font-bold text-sm text-slate-900"
             style={{ borderColor: theme.border, backgroundColor: theme.pastelSoft }}
           >
-            ประวัติการชำระเงินของโรงเรียน
+            ประวัติคำขอต่ออายุและการชำระเงิน
           </div>
           {payments.length === 0 ? (
-            <div className="p-8 text-center text-xs text-slate-500">ยังไม่มีประวัติการชำระเงิน</div>
+            <div className="p-8 text-center text-xs text-slate-500">ยังไม่มีประวัติคำขอต่ออายุ</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -480,9 +418,7 @@ export function BillingPage() {
                     <tr key={pay.id} className="border-b border-slate-100 last:border-b-0 hover:bg-white/60">
                       <td className="p-3.5 font-mono">{pay.id}</td>
                       <td className="p-3.5 font-semibold">{pay.planId}</td>
-                      <td className="p-3.5">
-                        {pay.method === 'bank_transfer' ? 'โอนเงินแนบสลิป' : 'Payment Gateway'}
-                      </td>
+                      <td className="p-3.5">โอนเงินแนบสลิป (รออนุมัติโดย Admin)</td>
                       <td className="p-3.5 text-right tabular-nums font-semibold">
                         ฿{pay.amount.toLocaleString()}
                       </td>
@@ -497,10 +433,10 @@ export function BillingPage() {
                           }`}
                         >
                           {pay.status === 'approved'
-                            ? 'อนุมัติแล้ว'
+                            ? 'Admin อนุมัติแล้ว'
                             : pay.status === 'rejected'
                             ? 'ถูกปฏิเสธ'
-                            : 'รอตรวจสอบ'}
+                            : 'รอ Admin อนุมัติ'}
                         </span>
                       </td>
                       <td className="p-3.5 text-slate-500">{pay.notes || pay.transferReference || '-'}</td>

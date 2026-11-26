@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, CheckCircle2, LogIn, School as SchoolIcon } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, Lock, LogIn, School as SchoolIcon, User, UserPlus } from 'lucide-react';
 import { ThemeSwitcher } from '../components/theme/ThemeSwitcher';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
@@ -16,12 +16,25 @@ export function SchoolSignupPage() {
   const [searchParams] = useSearchParams();
   const initialPlan = searchParams.get('plan') || 'professional';
 
-  const { currentUser, signInWithGoogle, refreshProfile } = useAuth();
+  const {
+    currentUser,
+    signInWithUsernamePassword,
+    registerWithUsernamePassword,
+    refreshProfile,
+  } = useAuth();
   const { plans, platformSettings, refreshTenant } = useTenant();
   const { theme } = useTheme();
   const { showToast } = useToast();
 
-  // Tenant form fields (Step 2)
+  // Step 1: Username & Password auth state
+  const [authMode, setAuthMode] = useState<'register' | 'login'>('register');
+  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Step 2: Tenant form fields
   const [nameTh, setNameTh] = useState('');
   const [nameEn, setNameEn] = useState('');
   const [slug, setSlug] = useState('');
@@ -32,11 +45,36 @@ export function SchoolSignupPage() {
 
   const cleanSlug = sanitizeSlug(slug);
 
-  const handleGoogleSignup = async () => {
+  const handleAccountSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username.trim() || !password) {
+      showToast('กรุณากรอก Username และ Password', 'warning');
+      return;
+    }
+    if (authMode === 'register') {
+      if (password.length < 6) {
+        showToast('รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร', 'warning');
+        return;
+      }
+      if (password !== confirmPassword) {
+        showToast('รหัสผ่านทั้งสองช่องไม่ตรงกัน', 'warning');
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
-      await signInWithGoogle();
-      showToast('ยืนยันตัวตนสำเร็จ กรุณากรอกข้อมูลโรงเรียนเพื่อเริ่มทดลองใช้', 'success');
+      if (authMode === 'register') {
+        await registerWithUsernamePassword({
+          username,
+          password,
+          displayName: displayName.trim() || username.trim(),
+        });
+        showToast('สร้างบัญชีผู้ใช้สำเร็จ กรุณากรอกข้อมูลโรงเรียนเพื่อเริ่มทดลองใช้', 'success');
+      } else {
+        await signInWithUsernamePassword(username, password);
+        showToast('เข้าสู่ระบบสำเร็จ กรุณากรอกข้อมูลโรงเรียนเพื่อเริ่มทดลองใช้', 'success');
+      }
     } catch (err) {
       showToast(formatErrorMessage(err), 'error');
     } finally {
@@ -47,7 +85,7 @@ export function SchoolSignupPage() {
   const handleCreateTenant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
-      showToast('กรุณาเข้าสู่ระบบด้วย Google ก่อนสร้างโรงเรียน', 'warning');
+      showToast('กรุณาเข้าสู่ระบบด้วย Username และ Password ก่อนสร้างโรงเรียน', 'warning');
       return;
     }
     if (!nameTh.trim() || cleanSlug.length < 2) {
@@ -70,7 +108,8 @@ export function SchoolSignupPage() {
         {
           uid: currentUser.uid,
           email: currentUser.email || '',
-          displayName: currentUser.displayName || currentUser.email,
+          username: currentUser.username || '',
+          displayName: currentUser.displayName || currentUser.username || currentUser.email,
         }
       );
       await refreshProfile();
@@ -119,7 +158,7 @@ export function SchoolSignupPage() {
                 สมัครใช้งานโรงเรียน (ทดลองฟรี {platformSettings.trialDays} วัน)
               </h1>
               <p className="text-sm text-slate-500">
-                ยืนยันตัวตนด้วย Google และสร้าง Subdomain โรงเรียนบน Cloud Firestore ได้ทันที
+                สร้างบัญชีด้วย Username และ Password จากนั้นกำหนด Subdomain โรงเรียนได้ทันที
               </p>
             </div>
           </div>
@@ -130,7 +169,7 @@ export function SchoolSignupPage() {
               className={currentUser ? 'text-emerald-700' : ''}
               style={!currentUser ? { color: theme.primary } : undefined}
             >
-              1. ยืนยันตัวตนผู้ดูแลโรงเรียน (Google Sign-In)
+              1. บัญชีผู้ดูแลโรงเรียน (Username & Password)
             </div>
             <div
               className={currentUser ? '' : 'text-slate-400'}
@@ -141,23 +180,129 @@ export function SchoolSignupPage() {
           </div>
 
           {!currentUser && (
-            <div className="mt-6 space-y-4">
-              <p className="text-sm text-slate-600 leading-relaxed">
-                เข้าสู่ระบบด้วยบัญชี Google ของผู้ดูแลโรงเรียนเพื่อสร้างพื้นที่ทำงานและทดลองใช้งานฟรี {platformSettings.trialDays} วัน
-              </p>
+            <form onSubmit={handleAccountSubmit} className="mt-6 space-y-4">
+              <div
+                className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl border w-fit"
+                style={{ backgroundColor: theme.pastelSoft, borderColor: theme.border }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('register')}
+                  className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                    authMode === 'register' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                  }`}
+                  style={authMode === 'register' ? { color: theme.primary } : undefined}
+                >
+                  สร้าง Username ใหม่
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthMode('login')}
+                  className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                    authMode === 'login' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                  }`}
+                  style={authMode === 'login' ? { color: theme.primary } : undefined}
+                >
+                  มีบัญชี Username อยู่แล้ว
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Username (a-z, 0-9, ., _, -) *
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      autoComplete="username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="เช่น admin.satit"
+                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-mono"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {authMode === 'register' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      ชื่อ-นามสกุลผู้ดูแลโรงเรียน *
+                    </label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="เช่น อ.สมชาย ใจดี"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm"
+                      required
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    รหัสผ่าน (Password อย่างน้อย 6 ตัวอักษร) *
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="กรอกรหัสผ่าน"
+                      className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-300 bg-white text-sm"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {authMode === 'register' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      ยืนยันรหัสผ่าน (Confirm Password) *
+                    </label>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="กรอกรหัสผ่านอีกครั้ง"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm"
+                      required
+                    />
+                  </div>
+                )}
+              </div>
+
               <button
-                type="button"
+                type="submit"
                 disabled={submitting}
-                onClick={() => void handleGoogleSignup()}
                 className="w-full py-3 px-4 text-white text-sm font-semibold rounded-xl shadow-xs hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2"
                 style={{
                   background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
                 }}
               >
-                <LogIn className="w-4 h-4" />
-                <span>{submitting ? 'กำลังเข้าสู่ระบบ...' : 'ดำเนินการต่อด้วย Google'}</span>
+                {authMode === 'register' ? <UserPlus className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
+                <span>
+                  {submitting
+                    ? 'กำลังดำเนินการ...'
+                    : authMode === 'register'
+                    ? 'สร้างบัญชีและดำเนินการต่อ'
+                    : 'เข้าสู่ระบบและดำเนินการต่อ'}
+                </span>
               </button>
-            </div>
+            </form>
           )}
 
           {currentUser && (
@@ -165,7 +310,7 @@ export function SchoolSignupPage() {
               <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-2.5 text-xs font-medium text-emerald-900">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>
-                  ยืนยันตัวตนแล้ว: <span className="font-mono font-bold">{currentUser.email}</span> ({currentUser.displayName})
+                  ยืนยันตัวตนแล้ว: <span className="font-mono font-bold">@{currentUser.username || currentUser.email}</span> ({currentUser.displayName})
                 </span>
               </div>
 

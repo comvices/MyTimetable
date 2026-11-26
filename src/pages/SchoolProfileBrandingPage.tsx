@@ -7,6 +7,7 @@ import { useTenant } from '../contexts/TenantContext';
 import { PASTEL_THEMES } from '../contexts/ThemeContext';
 import { useToast } from '../contexts/ToastContext';
 import { useSchoolWorkspace } from '../hooks/useSchoolWorkspace';
+import { extractUsername } from '../lib/authIdentifier';
 import { formatErrorMessage } from '../lib/firestoreError';
 import { DEFAULT_BRANDING } from '../lib/tenant';
 import {
@@ -106,7 +107,8 @@ export function SchoolProfileBrandingPage() {
   const actor = {
     uid: currentUser.uid,
     email: currentUser.email || '',
-    displayName: currentUser.displayName || currentUser.email,
+    username: currentUser.username || extractUsername(currentUser.email || ''),
+    displayName: currentUser.displayName || currentUser.username || currentUser.email,
   };
 
   const handleSaveProfileAndBranding = async (e: React.FormEvent) => {
@@ -658,57 +660,60 @@ export function SchoolProfileBrandingPage() {
                 <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-600">
                   <tr>
                     <th className="p-3 text-left">ชื่อ-นามสกุล</th>
-                    <th className="p-3 text-left">อีเมล</th>
+                    <th className="p-3 text-left">Username</th>
                     <th className="p-3 text-left">บทบาท</th>
                     <th className="p-3 text-right">จัดการ</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {workspace.members.map((m) => (
-                    <tr key={m.uid} className="border-b border-slate-100 last:border-b-0">
-                      <td className="p-3 font-medium text-slate-900">{m.displayName}</td>
-                      <td className="p-3 text-slate-600">{m.email}</td>
-                      <td className="p-3">
-                        <select
-                          value={m.role}
-                          disabled={isReadOnly || m.uid === currentUser.uid}
-                          onChange={(e) => {
-                            const nextRole = e.target.value as 'school_admin' | 'scheduler' | 'teacher';
-                            void upsertSchoolDoc(school.id, 'members', m.uid, { role: nextRole }, false)
-                              .then(() => showToast('อัปเดตบทบาทสมาชิกแล้ว', 'success'))
-                              .catch((err) => showToast(formatErrorMessage(err), 'error'));
-                          }}
-                          className="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white"
-                        >
-                          <option value="school_admin">School Admin</option>
-                          <option value="scheduler">Scheduler</option>
-                          <option value="teacher">Teacher</option>
-                        </select>
-                      </td>
-                      <td className="p-3 text-right">
-                        {m.uid !== currentUser.uid && (
-                          <button
-                            type="button"
-                            disabled={isReadOnly}
-                            onClick={async () => {
-                              const ok = await confirmAction({
-                                title: 'ลบสมาชิกออกจากโรงเรียน?',
-                                description: `ต้องการถอดสิทธิ์ ${m.email} ออกจากโรงเรียนนี้หรือไม่`,
-                                danger: true,
-                              });
-                              if (ok) {
-                                await deleteSchoolDoc(school.id, 'members', m.uid);
-                                showToast('ลบสมาชิกแล้ว', 'success');
-                              }
+                  {workspace.members.map((m) => {
+                    const memberUsername = m.username || extractUsername(m.email);
+                    return (
+                      <tr key={m.uid} className="border-b border-slate-100 last:border-b-0">
+                        <td className="p-3 font-medium text-slate-900">{m.displayName}</td>
+                        <td className="p-3 font-mono text-slate-600">@{memberUsername}</td>
+                        <td className="p-3">
+                          <select
+                            value={m.role}
+                            disabled={isReadOnly || m.uid === currentUser.uid}
+                            onChange={(e) => {
+                              const nextRole = e.target.value as 'school_admin' | 'scheduler' | 'teacher';
+                              void upsertSchoolDoc(school.id, 'members', m.uid, { role: nextRole }, false)
+                                .then(() => showToast('อัปเดตบทบาทสมาชิกแล้ว', 'success'))
+                                .catch((err) => showToast(formatErrorMessage(err), 'error'));
                             }}
-                            className="text-xs font-medium text-rose-600 hover:underline disabled:opacity-40"
+                            className="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white"
                           >
-                            ลบสิทธิ์
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                            <option value="school_admin">School Admin</option>
+                            <option value="scheduler">Scheduler</option>
+                            <option value="teacher">Teacher</option>
+                          </select>
+                        </td>
+                        <td className="p-3 text-right">
+                          {m.uid !== currentUser.uid && (
+                            <button
+                              type="button"
+                              disabled={isReadOnly}
+                              onClick={async () => {
+                                const ok = await confirmAction({
+                                  title: 'ลบสมาชิกออกจากโรงเรียน?',
+                                  description: `ต้องการถอดสิทธิ์ @${memberUsername} ออกจากโรงเรียนนี้หรือไม่`,
+                                  danger: true,
+                                });
+                                if (ok) {
+                                  await deleteSchoolDoc(school.id, 'members', m.uid);
+                                  showToast('ลบสมาชิกแล้ว', 'success');
+                                }
+                              }}
+                              className="text-xs font-medium text-rose-600 hover:underline disabled:opacity-40"
+                            >
+                              ลบสิทธิ์
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -719,15 +724,17 @@ export function SchoolProfileBrandingPage() {
             <div className="bg-white border border-slate-200 rounded-xl p-6">
               <h3 className="text-sm font-bold text-slate-900 mb-3">คำเชิญที่ส่งแล้ว</h3>
               <div className="space-y-2 text-xs">
-                {workspace.invites.map((inv) => (
-                  <div
-                    key={inv.id}
-                    className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-slate-50 border border-slate-200"
-                  >
-                    <div>
-                      <span className="font-semibold text-slate-900">{inv.email}</span>
-                      <span className="text-slate-500 ml-2">· {inv.role} · {inv.status}</span>
-                    </div>
+                {workspace.invites.map((inv) => {
+                  const invUsername = inv.username || extractUsername(inv.email);
+                  return (
+                    <div
+                      key={inv.id}
+                      className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-slate-50 border border-slate-200"
+                    >
+                      <div>
+                        <span className="font-mono font-semibold text-slate-900">@{invUsername}</span>
+                        <span className="text-slate-500 ml-2">· {inv.role} · {inv.status}</span>
+                      </div>
                     {inv.status === 'pending' && (
                       <button
                         type="button"
@@ -740,9 +747,10 @@ export function SchoolProfileBrandingPage() {
                       >
                         คัดลอกลิงก์
                       </button>
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

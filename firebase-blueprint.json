@@ -127,6 +127,7 @@
       "properties": {
         "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "email": { "type": "string", "maxLength": 200 },
+        "username": { "type": "string", "maxLength": 64 },
         "displayName": { "type": "string", "maxLength": 150 },
         "schoolId": { "type": "string", "maxLength": 128 },
         "schoolSlug": { "type": "string", "maxLength": 64 },
@@ -210,6 +211,7 @@
       "properties": {
         "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "email": { "type": "string", "maxLength": 200 },
+        "username": { "type": "string", "maxLength": 64 },
         "displayName": { "type": "string", "maxLength": 150 },
         "role": { "type": "string", "enum": ["school_admin", "scheduler", "teacher"] },
         "status": { "type": "string", "enum": ["active", "invited", "disabled"] },
@@ -222,12 +224,13 @@
     },
     "SchoolInvite": {
       "title": "SchoolInvite",
-      "description": "Email invitation for a school member",
+      "description": "Username invitation for a school member",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "schoolId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "email": { "type": "string", "maxLength": 200 },
+        "username": { "type": "string", "maxLength": 64 },
         "role": { "type": "string", "enum": ["school_admin", "scheduler", "teacher"] },
         "teacherId": { "type": "string", "maxLength": 128 },
         "status": { "type": "string", "enum": ["pending", "accepted", "revoked"] },

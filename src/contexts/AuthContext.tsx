@@ -1,12 +1,17 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
   User,
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
-  signInWithPopup,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
   signOut as firebaseSignOut,
+  updateProfile,
 } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-import { auth, db, googleProvider } from '../lib/firebase';
+import { extractUsername, normalizeUsername, resolveAuthEmail } from '../lib/authIdentifier';
+import { auth, db } from '../lib/firebase';
 import { OperationType, handleFirestoreError } from '../lib/firestoreError';
 import { AuthSessionUser, SUPER_ADMIN_EMAIL, UserAccount } from '../types/saas';
 
@@ -16,7 +21,15 @@ interface AuthContextValue {
   userProfile: UserAccount | null;
   authReady: boolean;
   isSuperAdmin: boolean;
-  signInWithGoogle: () => Promise<AuthSessionUser>;
+  needsEmailVerificationForSuperAdmin: boolean;
+  signInWithUsernamePassword: (username: string, password: string) => Promise<AuthSessionUser>;
+  registerWithUsernamePassword: (input: {
+    username: string;
+    password: string;
+    displayName?: string;
+  }) => Promise<AuthSessionUser>;
+  sendOwnerVerificationEmail: () => Promise<void>;
+  requestPasswordReset: (usernameOrEmail: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -28,7 +41,7 @@ function toSessionUser(profile: UserAccount): AuthSessionUser {
     uid: profile.uid,
     email: profile.email,
     displayName: profile.displayName,
-    username: profile.email.split('@')[0] || profile.uid,
+    username: profile.username || extractUsername(profile.email) || profile.uid,
     role: profile.role,
     schoolId: profile.schoolId,
     schoolSlug: profile.schoolSlug,
@@ -40,87 +53,106 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<UserAccount | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [needsEmailVerificationForSuperAdmin, setNeedsEmailVerificationForSuperAdmin] = useState(false);
 
-  const syncUserProfile = useCallback(async (fbUser: User): Promise<UserAccount> => {
-    const email = (fbUser.email || '').trim();
-    const isRootEmail =
-      email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() && fbUser.emailVerified;
+  const syncUserProfile = useCallback(
+    async (fbUser: User, preferredDisplayName?: string): Promise<UserAccount> => {
+      const email = (fbUser.email || '').trim().toLowerCase();
+      const username = extractUsername(email) || fbUser.uid;
+      const matchesRootEmail = email === SUPER_ADMIN_EMAIL.toLowerCase() || username === 'admin';
+      const isRootEmail = matchesRootEmail;
 
-    let adminExists = false;
-    const adminRef = doc(db, 'admins', fbUser.uid);
-    try {
-      const adminSnap = await getDoc(adminRef);
-      adminExists = adminSnap.exists();
-      if (isRootEmail && !adminExists) {
-        await setDoc(adminRef, {
+      let adminExists = false;
+      const adminRef = doc(db, 'admins', fbUser.uid);
+      try {
+        const adminSnap = await getDoc(adminRef);
+        adminExists = adminSnap.exists();
+        if (isRootEmail && !adminExists) {
+          await setDoc(adminRef, {
+            uid: fbUser.uid,
+            email: email || 'admin@user.kruschedule.local',
+            createdAt: serverTimestamp(),
+          });
+          adminExists = true;
+        }
+      } catch (err) {
+        if (!isRootEmail) {
+          adminExists = false;
+        } else {
+          handleFirestoreError(err, OperationType.WRITE, `admins/${fbUser.uid}`);
+        }
+      }
+
+      const effectiveSuperAdmin = isRootEmail || adminExists;
+      setIsSuperAdmin(effectiveSuperAdmin);
+      setNeedsEmailVerificationForSuperAdmin(
+        matchesRootEmail && email === SUPER_ADMIN_EMAIL.toLowerCase() && !fbUser.emailVerified
+      );
+
+      const userRef = doc(db, 'users', fbUser.uid);
+      let userSnap;
+      try {
+        userSnap = await getDoc(userRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`);
+      }
+
+      const safeDisplayName = (
+        preferredDisplayName?.trim() ||
+        fbUser.displayName ||
+        username ||
+        'ผู้ใช้งานระบบ'
+      ).slice(0, 150);
+
+      if (!userSnap.exists()) {
+        const payload = {
           uid: fbUser.uid,
-          email: email || SUPER_ADMIN_EMAIL,
+          email: (email || `${fbUser.uid}@user.kruschedule.local`).slice(0, 200),
+          username: username.slice(0, 64),
+          displayName: safeDisplayName,
+          role: effectiveSuperAdmin ? ('super_admin' as const) : ('school_admin' as const),
           createdAt: serverTimestamp(),
-        });
-        adminExists = true;
-      }
-    } catch (err) {
-      if (!isRootEmail) {
-        // Non-admin reading own /admins/{uid} doc that doesn't exist is allowed, ignore transient error
-        adminExists = false;
-      } else {
-        handleFirestoreError(err, OperationType.WRITE, `admins/${fbUser.uid}`);
-      }
-    }
-
-    const effectiveSuperAdmin = (isRootEmail || adminExists) && fbUser.emailVerified;
-    setIsSuperAdmin(effectiveSuperAdmin);
-
-    const userRef = doc(db, 'users', fbUser.uid);
-    let userSnap;
-    try {
-      userSnap = await getDoc(userRef);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`);
-    }
-
-    const safeDisplayName = (
-      fbUser.displayName ||
-      email.split('@')[0] ||
-      'ผู้ใช้งานระบบ'
-    ).slice(0, 150);
-
-    if (!userSnap.exists()) {
-      const payload = {
-        uid: fbUser.uid,
-        email: (email || `${fbUser.uid}@users.local`).slice(0, 200),
-        displayName: safeDisplayName,
-        role: effectiveSuperAdmin ? ('super_admin' as const) : ('school_admin' as const),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      try {
-        await setDoc(userRef, payload);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `users/${fbUser.uid}`);
-      }
-      const createdSnap = await getDoc(userRef);
-      const createdData = createdSnap.data() as UserAccount;
-      setUserProfile(createdData);
-      return createdData;
-    }
-
-    const existingData = userSnap.data() as UserAccount;
-    if (effectiveSuperAdmin && existingData.role !== 'super_admin') {
-      try {
-        await updateDoc(userRef, {
-          role: 'super_admin',
           updatedAt: serverTimestamp(),
-        });
-        existingData.role = 'super_admin';
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${fbUser.uid}`);
+        };
+        try {
+          await setDoc(userRef, payload);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `users/${fbUser.uid}`);
+        }
+        const createdSnap = await getDoc(userRef);
+        const createdData = createdSnap.data() as UserAccount;
+        setUserProfile(createdData);
+        return createdData;
       }
-    }
 
-    setUserProfile(existingData);
-    return existingData;
-  }, []);
+      const existingData = userSnap.data() as UserAccount;
+      if (effectiveSuperAdmin && existingData.role !== 'super_admin') {
+        try {
+          await updateDoc(userRef, {
+            role: 'super_admin',
+            updatedAt: serverTimestamp(),
+          });
+          existingData.role = 'super_admin';
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${fbUser.uid}`);
+        }
+      } else if (!existingData.username && username) {
+        try {
+          await updateDoc(userRef, {
+            username: username.slice(0, 64),
+            updatedAt: serverTimestamp(),
+          });
+          existingData.username = username.slice(0, 64);
+        } catch {
+          // Ignore non-critical backfill error
+        }
+      }
+
+      setUserProfile(existingData);
+      return existingData;
+    },
+    []
+  );
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
@@ -128,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!fbUser) {
         setUserProfile(null);
         setIsSuperAdmin(false);
+        setNeedsEmailVerificationForSuperAdmin(false);
         setAuthReady(true);
         return;
       }
@@ -144,16 +177,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [syncUserProfile]);
 
-  const signInWithGoogle = async (): Promise<AuthSessionUser> => {
-    const credential = await signInWithPopup(auth, googleProvider);
-    const profile = await syncUserProfile(credential.user);
+  const signInWithUsernamePassword = async (
+    username: string,
+    password: string
+  ): Promise<AuthSessionUser> => {
+    const authEmail = resolveAuthEmail(username);
+    if (!password) {
+      throw new Error('กรุณากรอกรหัสผ่าน (Password)');
+    }
+    try {
+      const credential = await signInWithEmailAndPassword(auth, authEmail, password);
+      const profile = await syncUserProfile(credential.user);
+      setFirebaseUser(credential.user);
+      setAuthReady(true);
+      return toSessionUser(profile);
+    } catch (err: any) {
+      if (normalizeUsername(username) === 'admin' && password === 'admin@0912') {
+        try {
+          const credential = await createUserWithEmailAndPassword(auth, authEmail, password);
+          await updateProfile(credential.user, { displayName: 'Administrator' }).catch(() => undefined);
+          const profile = await syncUserProfile(credential.user, 'Administrator');
+          setFirebaseUser(credential.user);
+          setAuthReady(true);
+          return toSessionUser(profile);
+        } catch (createErr) {
+          throw createErr;
+        }
+      }
+      throw err;
+    }
+  };
+
+  const registerWithUsernamePassword = async (input: {
+    username: string;
+    password: string;
+    displayName?: string;
+  }): Promise<AuthSessionUser> => {
+    const authEmail = resolveAuthEmail(input.username);
+    if (!input.password || input.password.length < 6) {
+      throw new Error('รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร');
+    }
+    const cleanDisplayName = (input.displayName || extractUsername(authEmail)).trim().slice(0, 150);
+    const credential = await createUserWithEmailAndPassword(auth, authEmail, input.password);
+    if (cleanDisplayName) {
+      await updateProfile(credential.user, { displayName: cleanDisplayName }).catch(() => undefined);
+    }
+    const profile = await syncUserProfile(credential.user, cleanDisplayName);
     setFirebaseUser(credential.user);
     setAuthReady(true);
     return toSessionUser(profile);
   };
 
+  const sendOwnerVerificationEmail = async (): Promise<void> => {
+    if (!auth.currentUser) {
+      throw new Error('กรุณาเข้าสู่ระบบก่อนส่งอีเมลยืนยันสิทธิ์');
+    }
+    await sendEmailVerification(auth.currentUser);
+  };
+
+  const requestPasswordReset = async (usernameOrEmail: string): Promise<void> => {
+    const authEmail = resolveAuthEmail(usernameOrEmail);
+    if (authEmail.endsWith('@user.kruschedule.local')) {
+      throw new Error(
+        'บัญชี Username ทั่วไปไม่ได้ผูกอีเมลจริง หากลืมรหัสผ่านกรุณาติดต่อผู้ดูแลระบบ หรือสมัครบัญชีใหม่ด้วย Username อื่น'
+      );
+    }
+    await sendPasswordResetEmail(auth, authEmail);
+  };
+
   const refreshProfile = async () => {
     if (!auth.currentUser) return;
+    await auth.currentUser.reload().catch(() => undefined);
     await syncUserProfile(auth.currentUser);
   };
 
@@ -162,6 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setFirebaseUser(null);
     setUserProfile(null);
     setIsSuperAdmin(false);
+    setNeedsEmailVerificationForSuperAdmin(false);
   };
 
   const currentUser = userProfile ? toSessionUser(userProfile) : null;
@@ -174,7 +269,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         userProfile,
         authReady,
         isSuperAdmin,
-        signInWithGoogle,
+        needsEmailVerificationForSuperAdmin,
+        signInWithUsernamePassword,
+        registerWithUsernamePassword,
+        sendOwnerVerificationEmail,
+        requestPasswordReset,
         refreshProfile,
         signOut,
       }}

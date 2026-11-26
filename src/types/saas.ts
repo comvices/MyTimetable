@@ -133,6 +133,7 @@ export interface AuthSessionUser {
 export interface SchoolMember {
   uid: string;
   email: string;
+  username?: string;
   displayName: string;
   role: 'school_admin' | 'scheduler' | 'teacher';
   status: 'active' | 'invited' | 'disabled';
@@ -146,6 +147,7 @@ export interface SchoolInvite {
   id: string;
   schoolId: string;
   email: string;
+  username?: string;
   role: 'school_admin' | 'scheduler' | 'teacher';
   teacherId?: string;
   status: 'pending' | 'accepted' | 'revoked';
@@ -209,9 +211,9 @@ export const DEFAULT_PLANS: Plan[] = [
     id: 'basic',
     name: 'Basic',
     nameTh: 'แพ็กเกจ Basic',
-    description: 'สำหรับโรงเรียนขนาดเล็กที่ต้องการจัดตารางสอนเป็นระบบ',
-    priceAnnual: 2900,
-    maxTeachers: 30,
+    description: 'จำกัดการจัดตารางเรียน 1 คน',
+    priceAnnual: 1900,
+    maxTeachers: 1,
     features: ['timetable', 'basic_info', 'branding', 'pdf_excel'],
     isActive: true,
   },
@@ -219,9 +221,9 @@ export const DEFAULT_PLANS: Plan[] = [
     id: 'professional',
     name: 'Professional',
     nameTh: 'แพ็กเกจ Professional',
-    description: 'สำหรับโรงเรียนขนาดกลาง รองรับตรวจตารางชน ล็อกกิจกรรม และส่งออก ZIP',
-    priceAnnual: 4900,
-    maxTeachers: 100,
+    description: 'จำกัดการจัดตารางเรียน 3 คน',
+    priceAnnual: 3900,
+    maxTeachers: 3,
     features: [
       'timetable',
       'basic_info',
@@ -239,9 +241,9 @@ export const DEFAULT_PLANS: Plan[] = [
     id: 'premium',
     name: 'Premium',
     nameTh: 'แพ็กเกจ Premium',
-    description: 'สำหรับโรงเรียนขนาดใหญ่หรือเครือข่าย จัดตารางอัตโนมัติและสำรองเวอร์ชัน',
-    priceAnnual: 7900,
-    maxTeachers: 500,
+    description: 'จำกัดการจัดตารางเรียนพร้อมกันไม่เกิน 10 คน',
+    priceAnnual: 6900,
+    maxTeachers: 10,
     features: [
       'timetable',
       'basic_info',

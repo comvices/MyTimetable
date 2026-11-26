@@ -13,6 +13,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
+import { extractUsername, resolveAuthEmail } from '../lib/authIdentifier';
 import { db } from '../lib/firebase';
 import { OperationType, handleFirestoreError } from '../lib/firestoreError';
 import { generateId, sanitizeSlug } from '../lib/tenant';
@@ -140,7 +141,8 @@ export async function createSchoolTenantAndTrial(
   batch.set(doc(db, 'schools', schoolId, 'members', actor.uid), {
     uid: actor.uid,
     email: (actor.email || '').slice(0, 200),
-    displayName: (actor.displayName || actor.email || 'ผู้ดูแลโรงเรียน').slice(0, 150),
+    username: (actor.username || extractUsername(actor.email || '')).slice(0, 64),
+    displayName: (actor.displayName || actor.username || actor.email || 'ผู้ดูแลโรงเรียน').slice(0, 150),
     role: 'school_admin',
     status: 'active',
     createdAt: serverTimestamp(),
@@ -563,17 +565,19 @@ export async function copyTimetableBetweenAcademicYears(
 
 export async function createSchoolInvite(
   schoolId: string,
-  email: string,
+  usernameOrEmail: string,
   role: 'school_admin' | 'scheduler' | 'teacher',
   teacherId: string,
   actor: ActorInfo
 ): Promise<SchoolInvite> {
   const inviteId = generateId('inv');
-  const cleanEmail = email.trim().toLowerCase();
+  const cleanEmail = resolveAuthEmail(usernameOrEmail);
+  const cleanUsername = extractUsername(cleanEmail);
   const payload = stripUndefined({
     id: inviteId,
     schoolId,
     email: cleanEmail,
+    username: cleanUsername,
     role,
     teacherId: teacherId || undefined,
     status: 'pending' as const,
@@ -592,6 +596,7 @@ export async function createSchoolInvite(
     id: inviteId,
     schoolId,
     email: cleanEmail,
+    username: cleanUsername,
     role,
     teacherId: teacherId || undefined,
     status: 'pending',
@@ -619,7 +624,8 @@ export async function acceptSchoolInvite(
       throw new Error('คำเชิญนี้ถูกใช้งานหรือยกเลิกไปแล้ว');
     }
     if (invite.email.toLowerCase() !== actor.email.toLowerCase()) {
-      throw new Error(`คำเชิญนี้ระบุสำหรับอีเมล ${invite.email} เท่านั้น`);
+      const targetLabel = invite.username || extractUsername(invite.email);
+      throw new Error(`คำเชิญนี้ระบุสำหรับ Username "${targetLabel}" เท่านั้น`);
     }
 
     const batch = writeBatch(db);
@@ -633,7 +639,8 @@ export async function acceptSchoolInvite(
       stripUndefined({
         uid: actor.uid,
         email: actor.email,
-        displayName: actor.displayName || actor.email,
+        username: (actor.username || extractUsername(actor.email)).slice(0, 64),
+        displayName: actor.displayName || actor.username || actor.email,
         role: invite.role,
         status: 'active',
         teacherId: invite.teacherId || undefined,

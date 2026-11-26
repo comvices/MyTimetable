@@ -3,9 +3,9 @@
 ## 1. Data Invariants
 1. **Strict Tenant Isolation**: Every school resource under `/schools/{schoolId}/*` is accessible ONLY if the authenticated user is an active member in `/schools/{schoolId}/members/{request.auth.uid}` or a verified Platform Super Admin (`isSuperAdmin()`).
 2. **Subscription Write Gate (Read-Only on Expiry)**: Mutations to school scheduling/master data (`/schools/{schoolId}/teachers`, `subjects`, `classrooms`, `rooms`, `timeSlots`, `activities`, `timetables`, `scheduleVersions`) MUST fail when the parent `/schools/{schoolId}` has `subscriptionStatus` in `['expired', 'suspended', 'cancelled']`.
-3. **No Frontend Privilege Escalation**: Users creating `/users/{uid}` cannot assign themselves `super_admin`. Users cannot elevate `subscriptionStatus`, `planId`, or `currentPeriodEnd` on `/schools/{schoolId}` or `/subscriptions/{id}` without Super Admin approval or verified payment gateway action.
+3. **No Frontend Privilege Escalation**: Users creating `/users/{uid}` cannot assign themselves `super_admin`. Users cannot elevate `subscriptionStatus`, `planId`, or `currentPeriodEnd` on `/schools/{schoolId}` or `/subscriptions/{id}`; only `isSuperAdmin()` can approve subscription renewals.
 4. **PII Isolation**: `/schoolSlugs/{slug}` exposes ONLY public login branding (`nameTh`, `nameEn`, `logoUrl`, `loginCoverUrl`, `backgroundUrl`, `primaryColor`, `secondaryColor`, `welcomeMessage`) and NEVER stores phone numbers, emails, addresses, or billing fields.
-5. **Payment Integrity**: Bank transfer payments created by a school admin start strictly in `status == 'pending_verification'`; only `isSuperAdmin()` can transition `status` to `'approved'` or `'rejected'`.
+5. **Payment & Renewal Integrity**: Renewal requests created by a school admin must use `method == 'bank_transfer'`, start strictly in `status == 'pending_verification'`, and have no `verifiedBy` field; ONLY `isSuperAdmin()` can transition `status` to `'approved'` or `'rejected'` and extend the school's subscription period.
 6. **Temporal & Identity Integrity**: `createdAt` uses `request.time`, `updatedAt` uses `request.time`, and immutable identifiers (`id`, `schoolId`, `ownerUid`, `createdBy`) cannot be rewritten on update.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
