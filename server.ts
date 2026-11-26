@@ -31,7 +31,10 @@ export function createApiApp() {
 export const app = createApiApp();
 
 async function startStandaloneServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distDir = path.resolve(process.cwd(), 'dist');
+  const hasDist = fs.existsSync(path.join(distDir, 'index.html'));
+
+  if (process.env.NODE_ENV !== 'production' || !hasDist) {
     const viteModule = 'vite';
     const { createServer: createViteServer } = await import(/* @vite-ignore */ viteModule);
     const vite = await createViteServer({
@@ -40,12 +43,18 @@ async function startStandaloneServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }
+
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('Unhandled server error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
+    }
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`ระบบจัดตารางสอน server listening on http://0.0.0.0:${PORT}`);
