@@ -1,170 +1,181 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { apiFetch, getAuthToken, setAuthToken } from '../lib/api';
-import { AuthSessionUser } from '../types/saas';
-
-interface BootstrapStatusResponse {
-  needsAdminSetup: boolean;
-  adminUsername: string;
-}
-
-interface AuthResponse {
-  token: string;
-  user: AuthSessionUser;
-}
+import {
+  User,
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { auth, db, googleProvider } from '../lib/firebase';
+import { OperationType, handleFirestoreError } from '../lib/firestoreError';
+import { AuthSessionUser, SUPER_ADMIN_EMAIL, UserAccount } from '../types/saas';
 
 interface AuthContextValue {
+  firebaseUser: User | null;
   currentUser: AuthSessionUser | null;
-  userProfile: AuthSessionUser | null;
+  userProfile: UserAccount | null;
   authReady: boolean;
   isSuperAdmin: boolean;
-  needsAdminSetup: boolean;
-  adminUsername: string;
-  loginWithUsername: (username: string, password: string) => Promise<AuthSessionUser>;
-  setupInitialAdmin: (
-    username: string,
-    password: string,
-    displayName?: string
-  ) => Promise<AuthSessionUser>;
-  signUpWithUsername: (
-    username: string,
-    password: string,
-    displayName: string,
-    email?: string
-  ) => Promise<AuthSessionUser>;
+  signInWithGoogle: () => Promise<AuthSessionUser>;
   refreshProfile: () => Promise<void>;
-  refreshBootstrapStatus: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<AuthSessionUser | null>(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [needsAdminSetup, setNeedsAdminSetup] = useState(false);
-  const [adminUsername, setAdminUsername] = useState('admin');
+function toSessionUser(profile: UserAccount): AuthSessionUser {
+  return {
+    uid: profile.uid,
+    email: profile.email,
+    displayName: profile.displayName,
+    username: profile.email.split('@')[0] || profile.uid,
+    role: profile.role,
+    schoolId: profile.schoolId,
+    schoolSlug: profile.schoolSlug,
+  };
+}
 
-  const refreshBootstrapStatus = useCallback(async () => {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserAccount | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  const syncUserProfile = useCallback(async (fbUser: User): Promise<UserAccount> => {
+    const email = (fbUser.email || '').trim();
+    const isRootEmail =
+      email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() && fbUser.emailVerified;
+
+    let adminExists = false;
+    const adminRef = doc(db, 'admins', fbUser.uid);
     try {
-      const status = await apiFetch<BootstrapStatusResponse>('/api/auth/bootstrap-status');
-      setNeedsAdminSetup(Boolean(status.needsAdminSetup));
-      if (status.adminUsername) {
-        setAdminUsername(status.adminUsername);
+      const adminSnap = await getDoc(adminRef);
+      adminExists = adminSnap.exists();
+      if (isRootEmail && !adminExists) {
+        await setDoc(adminRef, {
+          uid: fbUser.uid,
+          email: email || SUPER_ADMIN_EMAIL,
+          createdAt: serverTimestamp(),
+        });
+        adminExists = true;
       }
-    } catch {
-      // Ignore network hiccup on initial check
+    } catch (err) {
+      if (!isRootEmail) {
+        // Non-admin reading own /admins/{uid} doc that doesn't exist is allowed, ignore transient error
+        adminExists = false;
+      } else {
+        handleFirestoreError(err, OperationType.WRITE, `admins/${fbUser.uid}`);
+      }
     }
+
+    const effectiveSuperAdmin = (isRootEmail || adminExists) && fbUser.emailVerified;
+    setIsSuperAdmin(effectiveSuperAdmin);
+
+    const userRef = doc(db, 'users', fbUser.uid);
+    let userSnap;
+    try {
+      userSnap = await getDoc(userRef);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`);
+    }
+
+    const safeDisplayName = (
+      fbUser.displayName ||
+      email.split('@')[0] ||
+      'ผู้ใช้งานระบบ'
+    ).slice(0, 150);
+
+    if (!userSnap.exists()) {
+      const payload = {
+        uid: fbUser.uid,
+        email: (email || `${fbUser.uid}@users.local`).slice(0, 200),
+        displayName: safeDisplayName,
+        role: effectiveSuperAdmin ? ('super_admin' as const) : ('school_admin' as const),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      try {
+        await setDoc(userRef, payload);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `users/${fbUser.uid}`);
+      }
+      const createdSnap = await getDoc(userRef);
+      const createdData = createdSnap.data() as UserAccount;
+      setUserProfile(createdData);
+      return createdData;
+    }
+
+    const existingData = userSnap.data() as UserAccount;
+    if (effectiveSuperAdmin && existingData.role !== 'super_admin') {
+      try {
+        await updateDoc(userRef, {
+          role: 'super_admin',
+          updatedAt: serverTimestamp(),
+        });
+        existingData.role = 'super_admin';
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${fbUser.uid}`);
+      }
+    }
+
+    setUserProfile(existingData);
+    return existingData;
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await refreshBootstrapStatus();
-      const token = getAuthToken();
-      if (token) {
-        try {
-          const data = await apiFetch<{ user: AuthSessionUser }>('/api/auth/me');
-          if (!cancelled) {
-            setCurrentUser(data.user);
-          }
-        } catch {
-          setAuthToken(null);
-          if (!cancelled) setCurrentUser(null);
-        }
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setFirebaseUser(fbUser);
+      if (!fbUser) {
+        setUserProfile(null);
+        setIsSuperAdmin(false);
+        setAuthReady(true);
+        return;
       }
-      if (!cancelled) {
+
+      try {
+        await syncUserProfile(fbUser);
+      } catch (err) {
+        console.error('Failed to synchronize user profile:', err);
+      } finally {
         setAuthReady(true);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshBootstrapStatus]);
-
-  const loginWithUsername = async (username: string, password: string): Promise<AuthSessionUser> => {
-    const data = await apiFetch<AuthResponse>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username: username.trim(), password }),
     });
-    setAuthToken(data.token);
-    setCurrentUser(data.user);
-    setAuthReady(true);
-    return data.user;
-  };
 
-  const setupInitialAdmin = async (
-    username: string,
-    password: string,
-    displayName?: string
-  ): Promise<AuthSessionUser> => {
-    const data = await apiFetch<AuthResponse>('/api/auth/setup-admin', {
-      method: 'POST',
-      body: JSON.stringify({
-        username: username.trim(),
-        password,
-        displayName: displayName?.trim(),
-      }),
-    });
-    setAuthToken(data.token);
-    setCurrentUser(data.user);
-    setNeedsAdminSetup(false);
-    setAuthReady(true);
-    return data.user;
-  };
+    return () => unsubscribe();
+  }, [syncUserProfile]);
 
-  const signUpWithUsername = async (
-    username: string,
-    password: string,
-    displayName: string,
-    email?: string
-  ): Promise<AuthSessionUser> => {
-    const data = await apiFetch<AuthResponse>('/api/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({
-        username: username.trim(),
-        password,
-        displayName: displayName.trim(),
-        email: email?.trim(),
-      }),
-    });
-    setAuthToken(data.token);
-    setCurrentUser(data.user);
+  const signInWithGoogle = async (): Promise<AuthSessionUser> => {
+    const credential = await signInWithPopup(auth, googleProvider);
+    const profile = await syncUserProfile(credential.user);
+    setFirebaseUser(credential.user);
     setAuthReady(true);
-    return data.user;
+    return toSessionUser(profile);
   };
 
   const refreshProfile = async () => {
-    if (!getAuthToken()) return;
-    try {
-      const data = await apiFetch<{ user: AuthSessionUser }>('/api/auth/me');
-      setCurrentUser(data.user);
-    } catch {
-      setAuthToken(null);
-      setCurrentUser(null);
-    }
+    if (!auth.currentUser) return;
+    await syncUserProfile(auth.currentUser);
   };
 
   const signOut = async () => {
-    setAuthToken(null);
-    setCurrentUser(null);
+    await firebaseSignOut(auth);
+    setFirebaseUser(null);
+    setUserProfile(null);
+    setIsSuperAdmin(false);
   };
 
-  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const currentUser = userProfile ? toSessionUser(userProfile) : null;
 
   return (
     <AuthContext.Provider
       value={{
+        firebaseUser,
         currentUser,
-        userProfile: currentUser,
+        userProfile,
         authReady,
         isSuperAdmin,
-        needsAdminSetup,
-        adminUsername,
-        loginWithUsername,
-        setupInitialAdmin,
-        signUpWithUsername,
+        signInWithGoogle,
         refreshProfile,
-        refreshBootstrapStatus,
         signOut,
       }}
     >

@@ -11,7 +11,6 @@ import {
   DollarSign,
   ExternalLink,
   Eye,
-  KeyRound,
   Plus,
   Search,
   ShieldAlert,
@@ -49,7 +48,6 @@ import { createSchoolInvite } from '../services/schoolService';
 import {
   approvePaymentAndActivateSchool,
   createCouponAdmin,
-  createPlatformUserAdmin,
   fetchAdminOverview,
   grantSuperAdminAccess,
   rejectPaymentAdmin,
@@ -66,10 +64,9 @@ import {
   PaymentRecord,
   Plan,
   PlatformSettings,
-  SUPER_ADMIN_USERNAME,
+  SUPER_ADMIN_EMAIL,
   School,
   SubscriptionStatus,
-  UserRole,
 } from '../types/saas';
 
 type AdminTab = 'overview' | 'payments' | 'schools' | 'plans' | 'coupons' | 'admins' | 'audit';
@@ -111,22 +108,6 @@ export function SuperAdminPage() {
   const [testInviteRole, setTestInviteRole] = useState<'scheduler' | 'teacher' | 'school_admin'>('scheduler');
   const [generatedInviteLink, setGeneratedInviteLink] = useState('');
   const [creatingInvite, setCreatingInvite] = useState(false);
-
-  // Create direct Username & Password user form
-  const [newUserForm, setNewUserForm] = useState<{
-    username: string;
-    password: string;
-    displayName: string;
-    role: UserRole;
-    schoolId: string;
-  }>({
-    username: '',
-    password: '',
-    displayName: '',
-    role: 'scheduler',
-    schoolId: '',
-  });
-  const [creatingUser, setCreatingUser] = useState(false);
 
   const [slipModal, setSlipModal] = useState<PaymentRecord | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -237,13 +218,11 @@ export function SuperAdminPage() {
   const actor = {
     uid: currentUser.uid,
     email: currentUser.email || '',
-    displayName: currentUser.displayName || currentUser.username,
-    username: currentUser.username,
+    displayName: currentUser.displayName || currentUser.email,
   };
 
   const isPrimaryOwner =
-    currentUser.uid === 'usr_super_admin' ||
-    currentUser.username.toLowerCase() === SUPER_ADMIN_USERNAME.toLowerCase();
+    currentUser.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
 
   const adminUidSet = new Set(adminRegistry.map((a) => a.uid));
 
@@ -329,45 +308,10 @@ export function SuperAdminPage() {
     }
   };
 
-  const handleCreateDirectUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUserForm.username.trim() || newUserForm.password.length < 6) {
-      showToast('กรุณากรอก Username และรหัสผ่านอย่างน้อย 6 ตัวอักษร', 'warning');
-      return;
-    }
-    setCreatingUser(true);
-    try {
-      const targetSchoolId = newUserForm.schoolId || demoSchoolCandidate?.id || '';
-      const created = await createPlatformUserAdmin({
-        username: newUserForm.username.trim(),
-        password: newUserForm.password,
-        displayName: newUserForm.displayName.trim() || newUserForm.username.trim(),
-        role: newUserForm.role,
-        schoolId: newUserForm.role === 'super_admin' ? undefined : targetSchoolId || undefined,
-      });
-      await loadAllAdminData();
-      setNewUserForm({
-        username: '',
-        password: '',
-        displayName: '',
-        role: 'scheduler',
-        schoolId: targetSchoolId,
-      });
-      showToast(
-        `สร้างบัญชีผู้ใช้ @${created.username} (${created.role}) เรียบร้อยแล้ว สามารถใช้ล็อกอินได้ทันที`,
-        'success'
-      );
-    } catch (err) {
-      showToast(formatErrorMessage(err), 'error');
-    } finally {
-      setCreatingUser(false);
-    }
-  };
-
   return (
     <WorkspaceShell
       title="Super Admin Console — เจ้าของและผู้ดูแลระบบหลัก"
-      breadcrumb={`Platform Control Center · @${currentUser.username}`}
+      breadcrumb={`Platform Control Center · ${currentUser.email}`}
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -431,8 +375,8 @@ export function SuperAdminPage() {
               </span>
             </div>
             <div className="text-xs text-slate-600 truncate">
-              บัญชีควบคุมหลัก: <span className="font-mono font-semibold">@{currentUser.username}</span> ·
-              เข้าถึงได้ทุกโรงเรียน ตรวจสอบสลิป ควบคุมสถานะแพ็กเกจ และสร้างบัญชีผู้ใช้ด้วย Username/Password
+              บัญชีควบคุมหลัก: <span className="font-mono font-semibold">{currentUser.email}</span> ·
+              เข้าถึงได้ทุกโรงเรียน ตรวจสอบสลิป ควบคุมสถานะแพ็กเกจ และสร้างลิงก์เชิญผ่าน Cloud Firestore
             </div>
           </div>
         </div>
@@ -1176,7 +1120,7 @@ export function SuperAdminPage() {
                         3. ผู้ดูแลโรงเรียน (School Admin)
                       </div>
                       <div className="text-[11px] font-mono text-slate-500 mt-0.5">
-                        @{currentUser.username} · Role: school_admin
+                        {currentUser.email} · Role: school_admin
                       </div>
                       <p className="text-xs text-slate-600 mt-1.5">
                         จัดการข้อมูลครู วิชา ห้องเรียน ปรับแต่งอัตลักษณ์โรงเรียน เชิญสมาชิก และจัดตารางสอนได้ทั้งหมด
@@ -1203,93 +1147,7 @@ export function SuperAdminPage() {
               </div>
             )}
 
-            {/* Direct Username & Password Account Creator */}
-            <form
-              onSubmit={handleCreateDirectUser}
-              className="rounded-2xl border bg-white/85 p-4 space-y-3"
-              style={{ borderColor: theme.border }}
-            >
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
-                <KeyRound className="w-4 h-4" style={{ color: theme.primary }} />
-                <span>สร้างบัญชีผู้ใช้ใหม่ด้วย Username & Password (พร้อมใช้งานทันที)</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                <div className="md:col-span-2">
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Username *</label>
-                  <input
-                    type="text"
-                    value={newUserForm.username}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, username: e.target.value })}
-                    placeholder="scheduler01"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
-                    required
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Password (6+)*</label>
-                  <input
-                    type="password"
-                    value={newUserForm.password}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
-                    placeholder="••••••"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white"
-                    required
-                  />
-                </div>
-                <div className="md:col-span-3">
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">ชื่อ-นามสกุล</label>
-                  <input
-                    type="text"
-                    value={newUserForm.displayName}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, displayName: e.target.value })}
-                    placeholder="เช่น อ.สมชาย ผู้จัดตาราง"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">บทบาท</label>
-                  <select
-                    value={newUserForm.role}
-                    onChange={(e) =>
-                      setNewUserForm({ ...newUserForm, role: e.target.value as UserRole })
-                    }
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white"
-                  >
-                    <option value="scheduler">ผู้จัดตารางสอน</option>
-                    <option value="teacher">ครูผู้สอน</option>
-                    <option value="school_admin">ผู้ดูแลโรงเรียน</option>
-                    <option value="super_admin">Super Admin</option>
-                  </select>
-                </div>
-                <div className="md:col-span-3 flex gap-2">
-                  <select
-                    value={newUserForm.schoolId || demoSchoolCandidate?.id || ''}
-                    onChange={(e) => setNewUserForm({ ...newUserForm, schoolId: e.target.value })}
-                    disabled={newUserForm.role === 'super_admin'}
-                    className="flex-1 min-w-0 px-2.5 py-2 rounded-xl border border-slate-300 text-xs bg-white disabled:opacity-50"
-                  >
-                    <option value="">ไม่สังกัดโรงเรียน</option>
-                    {schools.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.nameTh}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="submit"
-                    disabled={creatingUser}
-                    className="px-3.5 py-2 text-white text-xs font-semibold rounded-xl shrink-0 hover:opacity-95 disabled:opacity-50"
-                    style={{
-                      background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
-                    }}
-                  >
-                    {creatingUser ? 'กำลังสร้าง...' : 'สร้างบัญชี'}
-                  </button>
-                </div>
-              </div>
-            </form>
-
-            {/* Invite user by Username */}
+            {/* Invite user by Google Email */}
             <form
               onSubmit={handleCreateTestInvite}
               className="rounded-2xl border bg-white/80 p-4 space-y-3"
@@ -1297,7 +1155,7 @@ export function SuperAdminPage() {
             >
               <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
                 <UserPlus className="w-4 h-4" style={{ color: theme.primary }} />
-                <span>สร้างลิงก์เชิญเข้าร่วมโรงเรียนด้วย Username</span>
+                <span>สร้างลิงก์เชิญเข้าร่วมโรงเรียนด้วยบัญชี Google (Email)</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                 <div className="md:col-span-4">
@@ -1317,13 +1175,13 @@ export function SuperAdminPage() {
                 </div>
                 <div className="md:col-span-4">
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Username ผู้รับเชิญ
+                    อีเมล Google ผู้รับเชิญ
                   </label>
                   <input
-                    type="text"
+                    type="email"
                     value={testInviteEmail}
                     onChange={(e) => setTestInviteEmail(e.target.value)}
-                    placeholder="scheduler01"
+                    placeholder="teacher@gmail.com"
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono bg-white"
                     required
                   />
@@ -1384,7 +1242,7 @@ export function SuperAdminPage() {
               <div>
                 <h2 className="text-sm font-bold text-slate-900">สิทธิ์เจ้าของและผู้ดูแลระบบหลัก</h2>
                 <p className="text-xs text-slate-600">
-                  เจ้าของแพลตฟอร์ม (@{SUPER_ADMIN_USERNAME}) มีสิทธิ์ถาวรและไม่สามารถถูกถอนสิทธิ์ได้ คุณสามารถมอบหรือถอนสิทธิ์ผู้ดูแลระบบให้บัญชีอื่นด้านล่าง
+                  เจ้าของแพลตฟอร์ม ({SUPER_ADMIN_EMAIL}) มีสิทธิ์ถาวรและไม่สามารถถูกถอนสิทธิ์ได้ คุณสามารถมอบหรือถอนสิทธิ์ผู้ดูแลระบบให้บัญชีอื่นด้านล่าง
                 </p>
               </div>
             </div>
@@ -1394,7 +1252,7 @@ export function SuperAdminPage() {
                 type="text"
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
-                placeholder="ค้นหาชื่อหรือ Username..."
+                placeholder="ค้นหาชื่อหรืออีเมล..."
                 className="w-full pl-9 pr-3 py-2 rounded-xl border bg-white text-xs focus:outline-none"
                 style={{ borderColor: theme.border }}
               />
@@ -1413,7 +1271,7 @@ export function SuperAdminPage() {
                 >
                   <tr>
                     <th className="p-3.5 text-left">ชื่อผู้ใช้งาน</th>
-                    <th className="p-3.5 text-left">Username</th>
+                    <th className="p-3.5 text-left">อีเมล</th>
                     <th className="p-3.5 text-left">โรงเรียน</th>
                     <th className="p-3.5 text-left">บทบาท</th>
                     <th className="p-3.5 text-right">จัดการสิทธิ์ Super Admin</th>
@@ -1422,14 +1280,13 @@ export function SuperAdminPage() {
                 <tbody>
                   {platformUsers
                     .filter((u) =>
-                      `${u.displayName} ${u.username} ${u.email} ${u.schoolSlug || ''}`
+                      `${u.displayName} ${u.email} ${u.schoolSlug || ''}`
                         .toLowerCase()
                         .includes(userSearch.trim().toLowerCase())
                     )
                     .map((u) => {
                       const isOwnerAccount =
-                        u.uid === 'usr_super_admin' ||
-                        u.username.toLowerCase() === SUPER_ADMIN_USERNAME.toLowerCase();
+                        u.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase();
                       const isAdmin = isOwnerAccount || adminUidSet.has(u.uid) || u.role === 'super_admin';
                       return (
                         <tr key={u.uid} className="border-b border-slate-100 last:border-b-0 hover:bg-white/60">
@@ -1439,7 +1296,7 @@ export function SuperAdminPage() {
                               {u.displayName || '-'}
                             </span>
                           </td>
-                          <td className="p-3.5 font-mono text-slate-700">@{u.username}</td>
+                          <td className="p-3.5 font-mono text-slate-700">{u.email}</td>
                           <td className="p-3.5 font-mono text-slate-500">{u.schoolSlug || '-'}</td>
                           <td className="p-3.5">
                             {isOwnerAccount ? (
@@ -1464,14 +1321,14 @@ export function SuperAdminPage() {
                                 onClick={async () => {
                                   const ok = await confirmAction({
                                     title: 'ถอนสิทธิ์ผู้ดูแลระบบ?',
-                                    description: `ต้องการถอนสิทธิ์ Super Admin ของ @${u.username} หรือไม่`,
+                                    description: `ต้องการถอนสิทธิ์ Super Admin ของ ${u.email} หรือไม่`,
                                     danger: true,
                                   });
                                   if (!ok) return;
                                   try {
-                                    await revokeSuperAdminAccess({ uid: u.uid, email: u.username }, actor);
+                                    await revokeSuperAdminAccess({ uid: u.uid, email: u.email }, actor);
                                     await loadAllAdminData();
-                                    showToast(`ถอนสิทธิ์ Super Admin ของ @${u.username} แล้ว`, 'info');
+                                    showToast(`ถอนสิทธิ์ Super Admin ของ ${u.email} แล้ว`, 'info');
                                   } catch (err) {
                                     showToast(formatErrorMessage(err), 'error');
                                   }
@@ -1487,13 +1344,13 @@ export function SuperAdminPage() {
                                 onClick={async () => {
                                   const ok = await confirmAction({
                                     title: 'มอบสิทธิ์ผู้ดูแลระบบหลัก?',
-                                    description: `บัญชี @${u.username} จะสามารถจัดการทุกโรงเรียน อนุมัติสลิป และตั้งค่าแพลตฟอร์มได้`,
+                                    description: `บัญชี ${u.email} จะสามารถจัดการทุกโรงเรียน อนุมัติสลิป และตั้งค่าแพลตฟอร์มได้`,
                                   });
                                   if (!ok) return;
                                   try {
-                                    await grantSuperAdminAccess({ uid: u.uid, email: u.username }, actor);
+                                    await grantSuperAdminAccess({ uid: u.uid, email: u.email }, actor);
                                     await loadAllAdminData();
-                                    showToast(`มอบสิทธิ์ Super Admin แก่ @${u.username} แล้ว`, 'success');
+                                    showToast(`มอบสิทธิ์ Super Admin แก่ ${u.email} แล้ว`, 'success');
                                   } catch (err) {
                                     showToast(formatErrorMessage(err), 'error');
                                   }

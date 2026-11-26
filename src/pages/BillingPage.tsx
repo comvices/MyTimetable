@@ -18,7 +18,7 @@ import {
 import { Coupon, PaymentRecord, Plan } from '../types/saas';
 
 export function BillingPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, isSuperAdmin } = useAuth();
   const { school, plans, currentPlan, platformSettings, daysRemaining, refreshTenant } = useTenant();
   const { theme } = useTheme();
   const { showToast } = useToast();
@@ -40,8 +40,8 @@ export function BillingPage() {
 
   useEffect(() => {
     if (!school?.id) return;
-    void fetchSchoolPayments(school.id).then(setPayments).catch(() => {});
-  }, [school?.id]);
+    void fetchSchoolPayments(school.id, isSuperAdmin).then(setPayments).catch(() => {});
+  }, [school?.id, isSuperAdmin]);
 
   if (!school || !currentUser) {
     return (
@@ -59,7 +59,7 @@ export function BillingPage() {
   const actor = {
     uid: currentUser.uid,
     email: currentUser.email || '',
-    displayName: currentUser.displayName || currentUser.username,
+    displayName: currentUser.displayName || currentUser.email,
   };
 
   const discountAmount = appliedCoupon
@@ -130,7 +130,7 @@ export function BillingPage() {
       setSlipPreview('');
       setTransferRef('');
       const [updated] = await Promise.all([
-        fetchSchoolPayments(school.id),
+        fetchSchoolPayments(school.id, isSuperAdmin),
         refreshTenant(),
       ]);
       setPayments(updated);
@@ -156,11 +156,11 @@ export function BillingPage() {
         actor
       );
       const [updated] = await Promise.all([
-        fetchSchoolPayments(school.id),
+        fetchSchoolPayments(school.id, isSuperAdmin),
         refreshTenant(),
       ]);
       setPayments(updated);
-      showToast(`ชำระเงินผ่าน Gateway และยืนยันลายเซ็น Session ${res.sessionId} สำเร็จ`, 'success');
+      showToast(`สร้างรายการชำระเงิน Session ${res.sessionId} แล้ว รอยืนยันสถานะ`, 'success');
     } catch (err) {
       showToast(formatErrorMessage(err), 'error');
     } finally {

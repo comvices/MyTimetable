@@ -106,7 +106,7 @@ export function SchoolProfileBrandingPage() {
   const actor = {
     uid: currentUser.uid,
     email: currentUser.email || '',
-    displayName: currentUser.displayName || currentUser.username,
+    displayName: currentUser.displayName || currentUser.email,
   };
 
   const handleSaveProfileAndBranding = async (e: React.FormEvent) => {

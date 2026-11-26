@@ -1,6 +1,4 @@
-import { CompatTimestamp } from '../lib/api';
-
-type Timestamp = CompatTimestamp;
+import type { Timestamp } from 'firebase/firestore';
 
 export type UserRole = 'super_admin' | 'school_admin' | 'scheduler' | 'teacher';
 
@@ -112,9 +110,9 @@ export interface SchoolSlugBranding {
 
 export interface UserAccount {
   uid: string;
-  username: string;
   email: string;
   displayName: string;
+  username?: string;
   schoolId?: string;
   schoolSlug?: string;
   role: UserRole;
@@ -124,9 +122,9 @@ export interface UserAccount {
 
 export interface AuthSessionUser {
   uid: string;
-  username: string;
   email: string;
   displayName: string;
+  username?: string;
   role: UserRole;
   schoolId?: string;
   schoolSlug?: string;
@@ -272,5 +270,6 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   supportEmail: 'support@kruschedule.app',
 };
 
-export const SUPER_ADMIN_USERNAME = 'admin';
+export const SUPER_ADMIN_EMAIL = 'phratchayawit.sri@gmail.com';
+export const SUPER_ADMIN_USERNAME = 'phratchayawit.sri';
 export const READ_ONLY_STATUSES: SubscriptionStatus[] = ['expired', 'suspended', 'cancelled'];

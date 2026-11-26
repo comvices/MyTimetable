@@ -1,35 +1,58 @@
-import { apiFetch } from '../lib/api';
+import {
+  Timestamp,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
+import { OperationType, handleFirestoreError } from '../lib/firestoreError';
 import { generateId } from '../lib/tenant';
 import {
   AuditLog,
   Coupon,
+  DEFAULT_PLANS,
+  DEFAULT_PLATFORM_SETTINGS,
   PaymentRecord,
   Plan,
   PlatformSettings,
   School,
   SubscriptionStatus,
-  UserRole,
+  UserAccount,
 } from '../types/saas';
-import { ActorInfo } from './schoolService';
+import { ActorInfo, writeAuditLog } from './schoolService';
 
 export async function uploadPaymentSlip(_schoolId: string, blob: Blob): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(String(reader.result || ''));
     reader.onerror = () => reject(new Error('ไม่สามารถอ่านรูปสลิปได้'));
     reader.readAsDataURL(blob);
   });
+  if (dataUrl.length > 790000) {
+    throw new Error('ไฟล์รูปสลิปมีขนาดใหญ่เกินไป กรุณาเลือกรูปที่เล็กลง');
+  }
+  return dataUrl;
 }
 
 export async function validateCouponCode(code: string): Promise<Coupon | null> {
   const clean = code.trim().toUpperCase();
-  if (!clean) return null;
+  if (!clean || !/^[a-zA-Z0-9_-]+$/.test(clean)) return null;
   try {
-    const res = await apiFetch<{ coupon: Coupon | null }>('/api/coupons/validate', {
-      method: 'POST',
-      body: JSON.stringify({ code: clean }),
-    });
-    return res.coupon || null;
+    const snap = await getDoc(doc(db, 'coupons', clean));
+    if (!snap.exists()) return null;
+    const coupon = snap.data() as Coupon;
+    if (!coupon.isActive || coupon.usedCount >= coupon.maxUses) return null;
+    if (coupon.expiresAt && Date.parse(coupon.expiresAt) < Date.now()) return null;
+    return coupon;
   } catch {
     return null;
   }
@@ -47,25 +70,41 @@ export async function submitBankTransferPayment(
     transferReference: string;
     notes?: string;
   },
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<string> {
-  const res = await apiFetch<{ paymentId: string }>(
-    `/api/schools/${encodeURIComponent(input.school.id)}/payments/bank-transfer`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        planId: input.plan.id,
-        amount: input.amount,
-        discountAmount: input.discountAmount,
-        couponCode: input.couponCode || '',
-        slipUrl: input.slipUrl,
-        transferDate: input.transferDate,
-        transferReference: input.transferReference,
-        notes: input.notes || '',
-      }),
-    }
-  );
-  return res.paymentId;
+  const paymentId = generateId('pay');
+  const path = `payments/${paymentId}`;
+  try {
+    await setDoc(doc(db, 'payments', paymentId), {
+      id: paymentId,
+      schoolId: input.school.id,
+      schoolName: input.school.nameTh.slice(0, 200),
+      planId: input.plan.id,
+      amount: Math.max(0, input.amount),
+      discountAmount: Math.max(0, input.discountAmount),
+      couponCode: (input.couponCode || '').slice(0, 40),
+      method: 'bank_transfer',
+      status: 'pending_verification',
+      slipUrl: input.slipUrl.slice(0, 800000),
+      transferDate: input.transferDate.slice(0, 60),
+      transferReference: input.transferReference.slice(0, 120),
+      notes: (input.notes || '').slice(0, 400),
+      createdBy: actor.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await writeAuditLog(
+      input.school.id,
+      actor,
+      'PAYMENT_SLIP_SUBMITTED',
+      'payment',
+      paymentId,
+      `Submitted bank transfer slip ฿${input.amount} (${input.plan.id})`
+    );
+    return paymentId;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, path);
+  }
 }
 
 export async function initiateAndVerifyGatewayPayment(
@@ -76,47 +115,64 @@ export async function initiateAndVerifyGatewayPayment(
     discountAmount: number;
     couponCode?: string;
   },
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<{ paymentId: string; sessionId: string; gatewaySignature: string }> {
   const paymentId = generateId('paygw');
-  const sessionData = await apiFetch<{ sessionId: string }>('/api/payments/create-session', {
-    method: 'POST',
-    body: JSON.stringify({
-      paymentId,
+  const sessionId = generateId('sess');
+  const gatewaySignature = `sig_${generateId('gw')}`;
+  const path = `payments/${paymentId}`;
+
+  try {
+    await setDoc(doc(db, 'payments', paymentId), {
+      id: paymentId,
       schoolId: input.school.id,
+      schoolName: input.school.nameTh.slice(0, 200),
       planId: input.plan.id,
-      amount: input.amount,
-    }),
-  });
-
-  const verifiedData = await apiFetch<{
-    paymentId?: string;
-    sessionId: string;
-    gatewaySignature: string;
-  }>('/api/payments/complete-sandbox', {
-    method: 'POST',
-    body: JSON.stringify({
-      sessionId: sessionData.sessionId,
-      couponCode: input.couponCode || '',
-      discountAmount: input.discountAmount,
-    }),
-  });
-
-  return {
-    paymentId: verifiedData.paymentId || paymentId,
-    sessionId: sessionData.sessionId,
-    gatewaySignature: verifiedData.gatewaySignature,
-  };
+      amount: Math.max(0, input.amount),
+      discountAmount: Math.max(0, input.discountAmount),
+      couponCode: (input.couponCode || '').slice(0, 40),
+      method: 'gateway',
+      status: 'pending_verification',
+      gatewaySessionId: sessionId,
+      gatewaySignature,
+      createdBy: actor.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await writeAuditLog(
+      input.school.id,
+      actor,
+      'PAYMENT_GATEWAY_SUBMITTED',
+      'payment',
+      paymentId,
+      `Submitted gateway session ${sessionId} for ฿${input.amount}`
+    );
+    return { paymentId, sessionId, gatewaySignature };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, path);
+  }
 }
 
-export async function fetchSchoolPayments(schoolId: string): Promise<PaymentRecord[]> {
+export async function fetchSchoolPayments(
+  schoolId: string,
+  isSuperAdmin = false
+): Promise<PaymentRecord[]> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return [];
   try {
-    const res = await apiFetch<{ payments: PaymentRecord[] }>(
-      `/api/schools/${encodeURIComponent(schoolId)}/payments`
-    );
-    return res.payments || [];
-  } catch {
-    return [];
+    const q = isSuperAdmin
+      ? query(collection(db, 'payments'), where('schoolId', '==', schoolId))
+      : query(
+          collection(db, 'payments'),
+          where('schoolId', '==', schoolId),
+          where('createdBy', '==', uid)
+        );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => d.data() as PaymentRecord)
+      .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'payments');
   }
 }
 
@@ -141,28 +197,123 @@ export interface AdminOverviewPayload {
 }
 
 export async function fetchAdminOverview(): Promise<AdminOverviewPayload> {
-  return await apiFetch<AdminOverviewPayload>('/api/admin/overview');
+  try {
+    const [schoolsSnap, paymentsSnap, couponsSnap, logsSnap, usersSnap, adminsSnap] =
+      await Promise.all([
+        getDocs(collection(db, 'schools')),
+        getDocs(collection(db, 'payments')),
+        getDocs(collection(db, 'coupons')),
+        getDocs(query(collection(db, 'auditLogs'), orderBy('createdAt', 'desc'))),
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'admins')),
+      ]);
+
+    return {
+      schools: schoolsSnap.docs.map((d) => d.data() as School),
+      payments: paymentsSnap.docs
+        .map((d) => d.data() as PaymentRecord)
+        .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)),
+      coupons: couponsSnap.docs.map((d) => d.data() as Coupon),
+      auditLogs: logsSnap.docs.map((d) => d.data() as AuditLog),
+      users: usersSnap.docs.map((d) => {
+        const u = d.data() as UserAccount;
+        return {
+          uid: u.uid,
+          username: u.email.split('@')[0] || u.uid,
+          email: u.email,
+          displayName: u.displayName,
+          role: u.role,
+          schoolId: u.schoolId,
+          schoolSlug: u.schoolSlug,
+        };
+      }),
+      admins: adminsSnap.docs.map((d) => {
+        const a = d.data() as { uid: string; email: string };
+        return {
+          uid: a.uid,
+          username: a.email.split('@')[0] || a.uid,
+          email: a.email,
+        };
+      }),
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'admin-overview');
+  }
 }
 
-export async function seedDefaultPlansAndSettings(_actor: ActorInfo): Promise<void> {
-  await apiFetch('/api/admin/seed-defaults', { method: 'POST' });
+export async function seedDefaultPlansAndSettings(actor: ActorInfo): Promise<void> {
+  try {
+    const batch = writeBatch(db);
+    DEFAULT_PLANS.forEach((plan) => {
+      batch.set(doc(db, 'plans', plan.id), {
+        id: plan.id,
+        name: plan.name,
+        nameTh: plan.nameTh,
+        description: plan.description || '',
+        priceAnnual: plan.priceAnnual,
+        maxTeachers: plan.maxTeachers,
+        features: plan.features,
+        isActive: plan.isActive,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    batch.set(doc(db, 'platformSettings', 'global'), {
+      trialDays: DEFAULT_PLATFORM_SETTINGS.trialDays,
+      bankName: DEFAULT_PLATFORM_SETTINGS.bankName,
+      bankAccountName: DEFAULT_PLATFORM_SETTINGS.bankAccountName,
+      bankAccountNumber: DEFAULT_PLATFORM_SETTINGS.bankAccountNumber,
+      promptPayId: DEFAULT_PLATFORM_SETTINGS.promptPayId || '',
+      supportEmail: DEFAULT_PLATFORM_SETTINGS.supportEmail || '',
+      updatedAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    await writeAuditLog('platform', actor, 'PLANS_SETTINGS_SEEDED', 'platform', 'global');
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'plans');
+  }
 }
 
-export async function savePlanAdmin(plan: Plan, _actor: ActorInfo): Promise<void> {
-  await apiFetch(`/api/admin/plans/${encodeURIComponent(plan.id)}`, {
-    method: 'PUT',
-    body: JSON.stringify(plan),
-  });
+export async function savePlanAdmin(plan: Plan, actor: ActorInfo): Promise<void> {
+  const path = `plans/${plan.id}`;
+  try {
+    await setDoc(doc(db, 'plans', plan.id), {
+      id: plan.id,
+      name: plan.name.slice(0, 80),
+      nameTh: plan.nameTh.slice(0, 100),
+      description: (plan.description || '').slice(0, 400),
+      priceAnnual: Math.max(0, Number(plan.priceAnnual)),
+      maxTeachers: Math.max(1, Number(plan.maxTeachers)),
+      features: plan.features.slice(0, 25),
+      isActive: Boolean(plan.isActive),
+      updatedAt: serverTimestamp(),
+    });
+    await writeAuditLog('platform', actor, 'PLAN_SAVED', 'plan', plan.id);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
 }
 
 export async function savePlatformSettingsAdmin(
   settings: PlatformSettings,
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<void> {
-  await apiFetch('/api/admin/settings', {
-    method: 'PUT',
-    body: JSON.stringify(settings),
-  });
+  const path = 'platformSettings/global';
+  try {
+    await setDoc(doc(db, 'platformSettings', 'global'), {
+      trialDays: Math.min(90, Math.max(1, Number(settings.trialDays))),
+      bankName: settings.bankName.slice(0, 120),
+      bankAccountName: settings.bankAccountName.slice(0, 150),
+      bankAccountNumber: settings.bankAccountNumber.slice(0, 50),
+      promptPayId: (settings.promptPayId || '').slice(0, 50),
+      supportEmail: (settings.supportEmail || '').slice(0, 200),
+      updatedAt: serverTimestamp(),
+    });
+    await writeAuditLog('platform', actor, 'SETTINGS_UPDATED', 'platformSettings', 'global');
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
 }
 
 export async function fetchAllSchoolsAdmin(): Promise<School[]> {
@@ -182,39 +333,98 @@ export async function fetchAllCouponsAdmin(): Promise<Coupon[]> {
 
 export async function createCouponAdmin(
   coupon: Omit<Coupon, 'usedCount' | 'createdAt'>,
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<void> {
-  await apiFetch('/api/admin/coupons', {
-    method: 'POST',
-    body: JSON.stringify(coupon),
-  });
+  const cleanCode = coupon.code.trim().toUpperCase();
+  const path = `coupons/${cleanCode}`;
+  try {
+    await setDoc(doc(db, 'coupons', cleanCode), {
+      code: cleanCode,
+      discountPercent: Math.min(100, Math.max(1, Number(coupon.discountPercent))),
+      maxUses: Math.max(1, Number(coupon.maxUses)),
+      usedCount: 0,
+      expiresAt: coupon.expiresAt ? coupon.expiresAt.slice(0, 60) : '',
+      isActive: Boolean(coupon.isActive),
+      createdAt: serverTimestamp(),
+    });
+    await writeAuditLog('platform', actor, 'COUPON_CREATED', 'coupon', cleanCode);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, path);
+  }
 }
 
 export async function toggleCouponActiveAdmin(code: string, isActive: boolean): Promise<void> {
-  await apiFetch(`/api/admin/coupons/${encodeURIComponent(code)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ isActive }),
-  });
+  const cleanCode = code.trim().toUpperCase();
+  const path = `coupons/${cleanCode}`;
+  try {
+    await updateDoc(doc(db, 'coupons', cleanCode), {
+      isActive,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
 }
 
 export async function approvePaymentAndActivateSchool(
   payment: PaymentRecord,
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<void> {
-  await apiFetch(`/api/admin/payments/${encodeURIComponent(payment.id)}/approve`, {
-    method: 'POST',
-  });
+  const path = `payments/${payment.id}`;
+  try {
+    const newPeriodEnd = Timestamp.fromDate(new Date(Date.now() + 365 * 86400000));
+    const batch = writeBatch(db);
+
+    batch.update(doc(db, 'payments', payment.id), {
+      status: 'approved',
+      verifiedBy: actor.uid,
+      updatedAt: serverTimestamp(),
+    });
+
+    batch.update(doc(db, 'schools', payment.schoolId), {
+      planId: payment.planId,
+      subscriptionStatus: 'active',
+      currentPeriodEnd: newPeriodEnd,
+      updatedAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    await writeAuditLog(
+      payment.schoolId,
+      actor,
+      'PAYMENT_APPROVED',
+      'payment',
+      payment.id,
+      `Approved payment ฿${payment.amount} and activated plan ${payment.planId}`
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
 }
 
 export async function rejectPaymentAdmin(
   payment: PaymentRecord,
   reason: string,
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<void> {
-  await apiFetch(`/api/admin/payments/${encodeURIComponent(payment.id)}/reject`, {
-    method: 'POST',
-    body: JSON.stringify({ reason }),
-  });
+  const path = `payments/${payment.id}`;
+  try {
+    await updateDoc(doc(db, 'payments', payment.id), {
+      status: 'rejected',
+      verifiedBy: actor.uid,
+      notes: reason.slice(0, 400),
+      updatedAt: serverTimestamp(),
+    });
+    await writeAuditLog(
+      payment.schoolId,
+      actor,
+      'PAYMENT_REJECTED',
+      'payment',
+      payment.id,
+      reason
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
 }
 
 export async function updateSchoolLifecycleAdmin(
@@ -222,12 +432,39 @@ export async function updateSchoolLifecycleAdmin(
   status: SubscriptionStatus,
   planId: string,
   extendDays: number,
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<void> {
-  await apiFetch(`/api/admin/schools/${encodeURIComponent(school.id)}/lifecycle`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status, planId, extendDays }),
-  });
+  const path = `schools/${school.id}`;
+  try {
+    const updates: Record<string, unknown> = {
+      subscriptionStatus: status,
+      planId,
+      updatedAt: serverTimestamp(),
+    };
+    if (extendDays > 0) {
+      const baseMs = Math.max(
+        Date.now(),
+        school.currentPeriodEnd?.toMillis() || school.trialEndsAt?.toMillis() || Date.now()
+      );
+      const nextTs = Timestamp.fromDate(new Date(baseMs + extendDays * 86400000));
+      if (status === 'trialing') {
+        updates.trialEndsAt = nextTs;
+      } else {
+        updates.currentPeriodEnd = nextTs;
+      }
+    }
+    await updateDoc(doc(db, 'schools', school.id), updates);
+    await writeAuditLog(
+      school.id,
+      actor,
+      'SCHOOL_LIFECYCLE_UPDATED',
+      'school',
+      school.id,
+      `Status=${status}, Plan=${planId}, ExtendDays=${extendDays}`
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
 }
 
 export async function fetchAuditLogsAdmin(schoolId?: string): Promise<AuditLog[]> {
@@ -238,73 +475,42 @@ export async function fetchAuditLogsAdmin(schoolId?: string): Promise<AuditLog[]
   return data.auditLogs;
 }
 
-export async function fetchAllPlatformUsersAdmin(): Promise<
-  Array<{
-    uid: string;
-    username: string;
-    email: string;
-    displayName: string;
-    role: string;
-    schoolId?: string;
-    schoolSlug?: string;
-  }>
-> {
-  const data = await fetchAdminOverview();
-  return data.users;
-}
-
-export async function fetchSuperAdminsRegistry(): Promise<
-  Array<{ uid: string; username: string; email: string }>
-> {
-  const data = await fetchAdminOverview();
-  return data.admins;
-}
-
-export async function createPlatformUserAdmin(input: {
-  username: string;
-  password: string;
-  displayName: string;
-  role: UserRole;
-  schoolId?: string;
-  teacherId?: string;
-}): Promise<{
-  uid: string;
-  username: string;
-  email: string;
-  displayName: string;
-  role: UserRole;
-}> {
-  const res = await apiFetch<{
-    user: {
-      uid: string;
-      username: string;
-      email: string;
-      displayName: string;
-      role: UserRole;
-    };
-  }>('/api/admin/users', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  });
-  return res.user;
-}
-
 export async function grantSuperAdminAccess(
   targetUser: { uid: string; email: string },
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<void> {
-  await apiFetch(`/api/admin/users/${encodeURIComponent(targetUser.uid)}/role`, {
-    method: 'PATCH',
-    body: JSON.stringify({ role: 'super_admin' }),
-  });
+  const path = `admins/${targetUser.uid}`;
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'admins', targetUser.uid), {
+      uid: targetUser.uid,
+      email: targetUser.email,
+      createdAt: serverTimestamp(),
+    });
+    batch.update(doc(db, 'users', targetUser.uid), {
+      role: 'super_admin',
+      updatedAt: serverTimestamp(),
+    });
+    await batch.commit();
+    await writeAuditLog('platform', actor, 'SUPER_ADMIN_GRANTED', 'user', targetUser.uid);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
 }
 
 export async function revokeSuperAdminAccess(
   targetUser: { uid: string; email: string },
-  _actor: ActorInfo
+  actor: ActorInfo
 ): Promise<void> {
-  await apiFetch(`/api/admin/users/${encodeURIComponent(targetUser.uid)}/role`, {
-    method: 'PATCH',
-    body: JSON.stringify({ role: 'school_admin' }),
-  });
+  const path = `admins/${targetUser.uid}`;
+  try {
+    await deleteDoc(doc(db, 'admins', targetUser.uid));
+    await updateDoc(doc(db, 'users', targetUser.uid), {
+      role: 'school_admin',
+      updatedAt: serverTimestamp(),
+    });
+    await writeAuditLog('platform', actor, 'SUPER_ADMIN_REVOKED', 'user', targetUser.uid);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
 }

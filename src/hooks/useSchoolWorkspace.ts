@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
-import { apiFetch, subscribeWorkspaceEvents } from '../lib/api';
+import { db } from '../lib/firebase';
+import { OperationType, handleFirestoreError } from '../lib/firestoreError';
 import { SchoolInvite, SchoolMember } from '../types/saas';
 import {
   AcademicYear,
@@ -34,25 +36,9 @@ export interface SchoolWorkspaceData {
   loading: boolean;
 }
 
-interface WorkspaceResponse {
-  academicYears: AcademicYear[];
-  departments: Department[];
-  teachers: Teacher[];
-  subjects: Subject[];
-  classrooms: Classroom[];
-  rooms: Room[];
-  timeSlots: TimeSlot[];
-  activities: ActivityLock[];
-  timetables: TimetableEntry[];
-  scheduleVersions: ScheduleVersion[];
-  scheduleHistory: ScheduleHistory[];
-  members: SchoolMember[];
-  invites: SchoolInvite[];
-}
-
 export function useSchoolWorkspace(): SchoolWorkspaceData {
-  const { authReady, currentUser } = useAuth();
-  const { school } = useTenant();
+  const { authReady, currentUser, isSuperAdmin } = useAuth();
+  const { school, member } = useTenant();
   const [loading, setLoading] = useState(true);
 
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
@@ -69,40 +55,7 @@ export function useSchoolWorkspace(): SchoolWorkspaceData {
   const [members, setMembers] = useState<SchoolMember[]>([]);
   const [invites, setInvites] = useState<SchoolInvite[]>([]);
 
-  const fetchWorkspace = useCallback(async (schoolId: string) => {
-    try {
-      const data = await apiFetch<WorkspaceResponse>(
-        `/api/schools/${encodeURIComponent(schoolId)}/workspace`
-      );
-      setAcademicYears(data.academicYears || []);
-      setDepartments(data.departments || []);
-      setTeachers(data.teachers || []);
-      setSubjects(data.subjects || []);
-      setClassrooms(data.classrooms || []);
-      setRooms(data.rooms || []);
-      setTimeSlots(
-        [...(data.timeSlots || [])].sort((a, b) => a.periodNumber - b.periodNumber)
-      );
-      setActivities(data.activities || []);
-      setTimetables(data.timetables || []);
-      setScheduleVersions(
-        [...(data.scheduleVersions || [])].sort(
-          (a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)
-        )
-      );
-      setScheduleHistory(
-        [...(data.scheduleHistory || [])].sort(
-          (a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)
-        )
-      );
-      setMembers(data.members || []);
-      setInvites(data.invites || []);
-    } catch (err) {
-      console.error('Failed to load school workspace:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const canListInvites = isSuperAdmin || member?.role === 'school_admin';
 
   useEffect(() => {
     if (!authReady || !currentUser || !school?.id) {
@@ -125,12 +78,65 @@ export function useSchoolWorkspace(): SchoolWorkspaceData {
 
     setLoading(true);
     const schoolId = school.id;
-    void fetchWorkspace(schoolId);
-    const unsub = subscribeWorkspaceEvents(schoolId, () => {
-      void fetchWorkspace(schoolId);
-    });
-    return () => unsub();
-  }, [authReady, currentUser, school?.id, fetchWorkspace]);
+    const unsubs: Array<() => void> = [];
+    let settled = false;
+
+    const markLoaded = () => {
+      if (!settled) {
+        settled = true;
+        setLoading(false);
+      }
+    };
+
+    const subscribeSubcollection = <T,>(
+      subName: string,
+      setter: (items: T[]) => void,
+      transform?: (items: T[]) => T[]
+    ) => {
+      const path = `schools/${schoolId}/${subName}`;
+      const unsub = onSnapshot(
+        collection(db, 'schools', schoolId, subName),
+        (snap) => {
+          const raw = snap.docs.map((d) => d.data() as T);
+          setter(transform ? transform(raw) : raw);
+          markLoaded();
+        },
+        (error) => {
+          handleFirestoreError(error, OperationType.LIST, path);
+        }
+      );
+      unsubs.push(unsub);
+    };
+
+    subscribeSubcollection<AcademicYear>('academicYears', setAcademicYears);
+    subscribeSubcollection<Department>('departments', setDepartments);
+    subscribeSubcollection<Teacher>('teachers', setTeachers);
+    subscribeSubcollection<Subject>('subjects', setSubjects);
+    subscribeSubcollection<Classroom>('classrooms', setClassrooms);
+    subscribeSubcollection<Room>('rooms', setRooms);
+    subscribeSubcollection<TimeSlot>('timeSlots', setTimeSlots, (items) =>
+      [...items].sort((a, b) => a.periodNumber - b.periodNumber)
+    );
+    subscribeSubcollection<ActivityLock>('activities', setActivities);
+    subscribeSubcollection<TimetableEntry>('timetables', setTimetables);
+    subscribeSubcollection<ScheduleVersion>('scheduleVersions', setScheduleVersions, (items) =>
+      [...items].sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0))
+    );
+    subscribeSubcollection<ScheduleHistory>('scheduleHistory', setScheduleHistory, (items) =>
+      [...items].sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0))
+    );
+    subscribeSubcollection<SchoolMember>('members', setMembers);
+
+    if (canListInvites) {
+      subscribeSubcollection<SchoolInvite>('invites', setInvites);
+    } else {
+      setInvites([]);
+    }
+
+    return () => {
+      unsubs.forEach((fn) => fn());
+    };
+  }, [authReady, currentUser, school?.id, canListInvites]);
 
   return {
     academicYears,

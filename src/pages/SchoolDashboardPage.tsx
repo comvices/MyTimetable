@@ -176,7 +176,7 @@ export function SchoolDashboardPage() {
                             {
                               uid: currentUser.uid,
                               email: currentUser.email || '',
-                              displayName: currentUser.displayName || currentUser.username,
+                              displayName: currentUser.displayName || currentUser.email,
                             },
                             activeYear?.id
                           );

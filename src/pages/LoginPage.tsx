@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, ArrowRight, KeyRound, LogOut, ShieldCheck, UserCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, LogIn, LogOut, ShieldCheck } from 'lucide-react';
 import { ThemeSwitcher } from '../components/theme/ThemeSwitcher';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
@@ -16,31 +16,12 @@ export function LoginPage() {
   const [searchParams] = useSearchParams();
   const inviteId = searchParams.get('invite');
 
-  const {
-    currentUser,
-    isSuperAdmin,
-    needsAdminSetup,
-    adminUsername,
-    loginWithUsername,
-    setupInitialAdmin,
-    signOut,
-  } = useAuth();
+  const { currentUser, isSuperAdmin, signInWithGoogle, signOut } = useAuth();
   const { publicBranding, school, tenantSlug, refreshTenant } = useTenant();
   const { theme } = useTheme();
   const { showToast } = useToast();
 
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [setupUsername, setSetupUsername] = useState(adminUsername || 'admin');
-  const [setupPassword, setSetupPassword] = useState('');
-  const [setupConfirm, setSetupConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (adminUsername) {
-      setSetupUsername(adminUsername);
-    }
-  }, [adminUsername]);
 
   const schoolName = publicBranding?.nameTh || DEFAULT_BRANDING.nameTh;
   const schoolNameEn = publicBranding?.nameEn || DEFAULT_BRANDING.nameEn;
@@ -55,15 +36,13 @@ export function LoginPage() {
     uid: string,
     userEmail: string,
     displayName: string,
-    role: string,
-    loggedUsername: string
+    role: string
   ) => {
     if (inviteId && publicBranding?.schoolId) {
       await acceptSchoolInvite(publicBranding.schoolId, publicBranding.slug, inviteId, {
         uid,
         email: userEmail,
         displayName,
-        username: loggedUsername,
       });
       await refreshTenant();
       showToast(`เข้าร่วมโรงเรียน ${publicBranding.nameTh} สำเร็จ`, 'success');
@@ -78,50 +57,16 @@ export function LoginPage() {
     navigate('/app/dashboard');
   };
 
-  const handleUsernameLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim() || !password) {
-      showToast('กรุณากรอก Username และรหัสผ่าน', 'warning');
-      return;
-    }
+  const handleGoogleLogin = async () => {
     setSubmitting(true);
     try {
-      const user = await loginWithUsername(username, password);
+      const user = await signInWithGoogle();
       showToast(`ยินดีต้อนรับ ${user.displayName}`, 'success');
       await completePostLogin(
         user.uid,
         user.email || '',
-        user.displayName || user.username,
-        user.role,
-        user.username
-      );
-    } catch (err) {
-      showToast(formatErrorMessage(err), 'error');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleSetupInitialAdmin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!setupUsername.trim() || setupPassword.length < 6) {
-      showToast('กรุณากำหนด Username และรหัสผ่านอย่างน้อย 6 ตัวอักษร', 'warning');
-      return;
-    }
-    if (setupPassword !== setupConfirm) {
-      showToast('รหัสผ่านยืนยันไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง', 'warning');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const admin = await setupInitialAdmin(setupUsername, setupPassword);
-      showToast('ตั้งค่าบัญชี Super Admin สำเร็จ กำลังเข้าสู่ระบบควบคุมหลัก', 'success');
-      await completePostLogin(
-        admin.uid,
-        admin.email,
-        admin.displayName,
-        admin.role,
-        admin.username
+        user.displayName || user.email,
+        user.role
       );
     } catch (err) {
       showToast(formatErrorMessage(err), 'error');
@@ -190,7 +135,7 @@ export function LoginPage() {
             )}
             <h2 className="text-2xl font-bold leading-snug">{welcomeMsg}</h2>
             <p className="mt-3 text-sm text-white/85">
-              เข้าสู่ระบบด้วย Username และ Password เพื่อจัดการตารางสอน ตารางเรียน และข้อมูลวิชาการของสถานศึกษา
+              เข้าสู่ระบบด้วยบัญชี Google ผ่าน Firebase Authentication เพื่อจัดการตารางสอน ตารางเรียน และข้อมูลวิชาการของสถานศึกษาอย่างปลอดภัย
             </p>
           </div>
         </div>
@@ -209,8 +154,14 @@ export function LoginPage() {
           <p className="mt-1 text-sm text-slate-500">
             {publicBranding
               ? `เข้าสู่พื้นที่ทำงานของ ${publicBranding.nameTh}`
-              : 'กรอก Username และ Password เพื่อเข้าใช้งานระบบ'}
+              : 'ยืนยันตัวตนด้วยบัญชี Google เพื่อเข้าใช้งานระบบ'}
           </p>
+
+          {inviteId && publicBranding && (
+            <div className="mt-4 p-3.5 rounded-xl bg-sky-50 border border-sky-200 text-xs text-sky-900">
+              คุณได้รับคำเชิญเข้าร่วม <strong>{publicBranding.nameTh}</strong> กรุณาเข้าสู่ระบบด้วยบัญชี Google ที่มีอีเมลตรงกับคำเชิญเพื่อยืนยันสิทธิ์
+            </div>
+          )}
 
           {currentUser && !inviteId ? (
             <div
@@ -231,7 +182,7 @@ export function LoginPage() {
                     เข้าสู่ระบบอยู่แล้วในชื่อ {currentUser.displayName}
                   </div>
                   <div className="text-xs text-slate-600 truncate font-mono">
-                    @{currentUser.username} ·{' '}
+                    {currentUser.email} ·{' '}
                     {isSuperAdmin ? 'เจ้าของและผู้ดูแลระบบหลัก (Super Admin)' : currentUser.role}
                   </div>
                 </div>
@@ -268,128 +219,49 @@ export function LoginPage() {
                   className="inline-flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>สลับบัญชี</span>
+                  <span>ออกจากระบบ</span>
                 </button>
               </div>
-            </div>
-          ) : needsAdminSetup && !publicBranding ? (
-            <div className="mt-6 space-y-4">
-              <div
-                className="p-4 rounded-2xl border space-y-1.5"
-                style={{ backgroundColor: theme.pastelSoft, borderColor: theme.border }}
-              >
-                <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-                  <KeyRound className="w-4 h-4" style={{ color: primaryColor }} />
-                  ตั้งค่าบัญชี Super Admin ครั้งแรก
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  ยังไม่มีรหัสผ่านของเจ้าของระบบในฐานข้อมูล กรุณากำหนดรหัสผ่านสำหรับ Username{' '}
-                  <span className="font-mono font-semibold text-slate-900">{setupUsername}</span>{' '}
-                  เพื่อเปิดใช้งาน Super Admin Console ทันที
-                </p>
-              </div>
-
-              <form onSubmit={handleSetupInitialAdmin} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Username ผู้ดูแลระบบหลัก
-                  </label>
-                  <input
-                    type="text"
-                    value={setupUsername}
-                    onChange={(e) => setSetupUsername(e.target.value)}
-                    placeholder="admin"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:outline-none focus:ring-2"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    กำหนดรหัสผ่าน (อย่างน้อย 6 ตัวอักษร)
-                  </label>
-                  <input
-                    type="password"
-                    value={setupPassword}
-                    onChange={(e) => setSetupPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    ยืนยันรหัสผ่านอีกครั้ง
-                  </label>
-                  <input
-                    type="password"
-                    value={setupConfirm}
-                    onChange={(e) => setSetupConfirm(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2"
-                    required
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full py-2.5 px-4 rounded-xl text-white text-sm font-semibold transition-opacity hover:opacity-95 disabled:opacity-50 shadow-xs"
-                  style={{
-                    background: `linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%)`,
-                  }}
-                >
-                  {submitting ? 'กำลังบันทึก...' : 'ตั้งรหัสผ่านและเข้าสู่ Super Admin'}
-                </button>
-              </form>
             </div>
           ) : (
-            <form onSubmit={handleUsernameLogin} className="mt-6 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  ชื่อผู้ใช้งาน (Username)
-                </label>
-                <div className="relative">
-                  <UserCheck className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="admin หรือชื่อผู้ใช้งาน"
-                    autoComplete="username"
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2"
-                    required
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  รหัสผ่าน (Password)
-                </label>
-                <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2"
-                    required
-                  />
-                </div>
-              </div>
+            <div className="mt-6 space-y-4">
+              {currentUser && inviteId && publicBranding && (
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() =>
+                    void completePostLogin(
+                      currentUser.uid,
+                      currentUser.email,
+                      currentUser.displayName,
+                      currentUser.role
+                    ).catch((err) => showToast(formatErrorMessage(err), 'error'))
+                  }
+                  className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-xs disabled:opacity-50"
+                >
+                  {submitting
+                    ? 'กำลังยืนยันคำเชิญ...'
+                    : `ยืนยันเข้าร่วม ${publicBranding.nameTh} ด้วยบัญชี ${currentUser.email}`}
+                </button>
+              )}
 
               <button
-                type="submit"
+                type="button"
                 disabled={submitting}
-                className="w-full py-2.5 px-4 rounded-xl text-white text-sm font-semibold transition-opacity hover:opacity-95 disabled:opacity-50 shadow-xs"
+                onClick={() => void handleGoogleLogin()}
+                className="w-full py-3 px-4 rounded-xl text-white text-sm font-semibold flex items-center justify-center gap-2.5 transition-opacity hover:opacity-95 disabled:opacity-50 shadow-xs"
                 style={{
                   background: `linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%)`,
                 }}
               >
-                {submitting ? 'กำลังตรวจสอบ...' : 'เข้าสู่ระบบ'}
+                <LogIn className="w-4 h-4" />
+                <span>{submitting ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบด้วย Google'}</span>
               </button>
-            </form>
+
+              <p className="text-xs text-slate-500 text-center leading-relaxed">
+                ระบบเชื่อมต่อกับ Firebase Authentication & Cloud Firestore โดยแยกสิทธิ์การเข้าถึงตามโรงเรียนอัตโนมัติ
+              </p>
+            </div>
           )}
 
           <div className="mt-6 pt-6 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">

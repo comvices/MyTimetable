@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { apiFetch } from '../lib/api';
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { OperationType, handleFirestoreError } from '../lib/firestoreError';
 import {
   DEFAULT_BRANDING,
   getDaysRemaining,
@@ -50,7 +52,7 @@ const TenantContext = createContext<TenantContextValue | null>(null);
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { currentUser, authReady, isSuperAdmin } = useAuth();
+  const { currentUser, userProfile, authReady, isSuperAdmin } = useAuth();
 
   const [tenantSlug, setTenantSlug] = useState<string | null>(() =>
     resolveTenantSlugFromLocation(window.location.pathname, window.location.search)
@@ -112,7 +114,6 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setTenantSlug(resolved);
   }, [location.pathname, location.search]);
 
-  // Apply dynamic CSS branding variables to document root
   useEffect(() => {
     const primary = school?.primaryColor || publicBranding?.primaryColor || DEFAULT_BRANDING.primaryColor;
     const secondary = school?.secondaryColor || publicBranding?.secondaryColor || DEFAULT_BRANDING.secondaryColor;
@@ -122,17 +123,23 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
   const loadPlatformGlobals = useCallback(async () => {
     try {
-      const data = await apiFetch<{ plans?: Plan[]; platformSettings?: PlatformSettings }>(
-        '/api/public/bootstrap'
-      );
-      if (Array.isArray(data.plans) && data.plans.length > 0) {
-        setPlans(data.plans);
+      const [plansSnap, settingsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'plans'), where('isActive', '==', true))),
+        getDoc(doc(db, 'platformSettings', 'global')),
+      ]);
+      if (!plansSnap.empty) {
+        const fetchedPlans = plansSnap.docs
+          .map((d) => d.data() as Plan)
+          .sort((a, b) => a.priceAnnual - b.priceAnnual);
+        setPlans(fetchedPlans);
+      } else {
+        setPlans(DEFAULT_PLANS);
       }
-      if (data.platformSettings) {
-        setPlatformSettings(data.platformSettings);
+      if (settingsSnap.exists()) {
+        setPlatformSettings(settingsSnap.data() as PlatformSettings);
       }
     } catch {
-      // Fall back to default catalog
+      // Fall back to default catalog on initial unbootstrapped DB
     }
   }, []);
 
@@ -145,11 +152,14 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
       if (tenantSlug) {
         try {
-          const res = await apiFetch<{ branding: SchoolSlugBranding }>(
-            `/api/public/slug/${encodeURIComponent(tenantSlug)}`
-          );
-          setPublicBranding(res.branding);
-          targetSchoolId = res.branding.schoolId;
+          const slugSnap = await getDoc(doc(db, 'schoolSlugs', tenantSlug));
+          if (slugSnap.exists()) {
+            const branding = slugSnap.data() as SchoolSlugBranding;
+            setPublicBranding(branding);
+            targetSchoolId = branding.schoolId;
+          } else {
+            setPublicBranding(null);
+          }
         } catch {
           setPublicBranding(null);
         }
@@ -164,13 +174,43 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const queryStr = targetSchoolId ? `?schoolId=${encodeURIComponent(targetSchoolId)}` : '';
+      if (!targetSchoolId && userProfile?.schoolId) {
+        targetSchoolId = userProfile.schoolId;
+      }
+
+      if (!targetSchoolId) {
+        try {
+          const ownedSnap = await getDocs(
+            query(collection(db, 'schools'), where('ownerUid', '==', currentUser.uid), limit(1))
+          );
+          if (!ownedSnap.empty) {
+            targetSchoolId = ownedSnap.docs[0].id;
+          }
+        } catch (err) {
+          handleFirestoreError(err, OperationType.LIST, 'schools');
+        }
+      }
+
+      if (!targetSchoolId) {
+        setSchool(null);
+        setMember(null);
+        setLoadingTenant(false);
+        return;
+      }
+
       try {
-        const res = await apiFetch<{ school: School | null; member: SchoolMember | null }>(
-          `/api/schools/mine${queryStr}`
+        const schoolSnap = await getDoc(doc(db, 'schools', targetSchoolId));
+        if (!schoolSnap.exists()) {
+          setSchool(null);
+          setMember(null);
+          return;
+        }
+        setSchool(schoolSnap.data() as School);
+
+        const memberSnap = await getDoc(
+          doc(db, 'schools', targetSchoolId, 'members', currentUser.uid)
         );
-        setSchool(res.school || null);
-        setMember(res.member || null);
+        setMember(memberSnap.exists() ? (memberSnap.data() as SchoolMember) : null);
       } catch {
         setSchool(null);
         setMember(null);
@@ -178,7 +218,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoadingTenant(false);
     }
-  }, [tenantSlug, overrideSchoolId, authReady, currentUser, loadPlatformGlobals]);
+  }, [tenantSlug, overrideSchoolId, authReady, currentUser, userProfile?.schoolId, loadPlatformGlobals]);
 
   useEffect(() => {
     void loadTenant();

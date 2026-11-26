@@ -1,6 +1,4 @@
-import { CompatTimestamp } from '../lib/api';
-
-type Timestamp = CompatTimestamp;
+import type { Timestamp } from 'firebase/firestore';
 
 export interface AcademicYear {
   id: string;

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, CheckCircle2, KeyRound, School as SchoolIcon, UserPlus } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, LogIn, School as SchoolIcon } from 'lucide-react';
 import { ThemeSwitcher } from '../components/theme/ThemeSwitcher';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
@@ -16,15 +16,10 @@ export function SchoolSignupPage() {
   const [searchParams] = useSearchParams();
   const initialPlan = searchParams.get('plan') || 'professional';
 
-  const { currentUser, signUpWithUsername, refreshProfile } = useAuth();
+  const { currentUser, signInWithGoogle, refreshProfile } = useAuth();
   const { plans, platformSettings, refreshTenant } = useTenant();
   const { theme } = useTheme();
   const { showToast } = useToast();
-
-  // Auth form fields (Step 1)
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
 
   // Tenant form fields (Step 2)
   const [nameTh, setNameTh] = useState('');
@@ -37,16 +32,11 @@ export function SchoolSignupPage() {
 
   const cleanSlug = sanitizeSlug(slug);
 
-  const handleUsernameSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username.trim() || password.length < 6 || !displayName.trim()) {
-      showToast('กรุณากรอก Username ชื่อผู้ดูแล และรหัสผ่านอย่างน้อย 6 ตัวอักษร', 'warning');
-      return;
-    }
+  const handleGoogleSignup = async () => {
     setSubmitting(true);
     try {
-      await signUpWithUsername(username, password, displayName);
-      showToast('สร้างบัญชีผู้ใช้งานสำเร็จ กรุณากรอกข้อมูลโรงเรียนเพื่อเริ่มทดลองใช้', 'success');
+      await signInWithGoogle();
+      showToast('ยืนยันตัวตนสำเร็จ กรุณากรอกข้อมูลโรงเรียนเพื่อเริ่มทดลองใช้', 'success');
     } catch (err) {
       showToast(formatErrorMessage(err), 'error');
     } finally {
@@ -57,7 +47,7 @@ export function SchoolSignupPage() {
   const handleCreateTenant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
-      showToast('กรุณาสมัครบัญชีผู้ใช้งานก่อนสร้างโรงเรียน', 'warning');
+      showToast('กรุณาเข้าสู่ระบบด้วย Google ก่อนสร้างโรงเรียน', 'warning');
       return;
     }
     if (!nameTh.trim() || cleanSlug.length < 2) {
@@ -80,8 +70,7 @@ export function SchoolSignupPage() {
         {
           uid: currentUser.uid,
           email: currentUser.email || '',
-          displayName: currentUser.displayName || displayName || currentUser.username,
-          username: currentUser.username,
+          displayName: currentUser.displayName || currentUser.email,
         }
       );
       await refreshProfile();
@@ -130,7 +119,7 @@ export function SchoolSignupPage() {
                 สมัครใช้งานโรงเรียน (ทดลองฟรี {platformSettings.trialDays} วัน)
               </h1>
               <p className="text-sm text-slate-500">
-                สร้างบัญชี Username / Password และ Subdomain โรงเรียนได้ทันที
+                ยืนยันตัวตนด้วย Google และสร้าง Subdomain โรงเรียนบน Cloud Firestore ได้ทันที
               </p>
             </div>
           </div>
@@ -141,7 +130,7 @@ export function SchoolSignupPage() {
               className={currentUser ? 'text-emerald-700' : ''}
               style={!currentUser ? { color: theme.primary } : undefined}
             >
-              1. สมัครบัญชีผู้ดูแลโรงเรียน (Username / Password)
+              1. ยืนยันตัวตนผู้ดูแลโรงเรียน (Google Sign-In)
             </div>
             <div
               className={currentUser ? '' : 'text-slate-400'}
@@ -152,67 +141,23 @@ export function SchoolSignupPage() {
           </div>
 
           {!currentUser && (
-            <form onSubmit={handleUsernameSignup} className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  ชื่อ-นามสกุล ผู้ดูแลโรงเรียน
-                </label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="เช่น อ.สมชาย ใจดี"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Username (ภาษาอังกฤษ/ตัวเลข 3+ ตัวอักษร)
-                </label>
-                <div className="relative">
-                  <UserPlus className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="schooladmin01"
-                    autoComplete="username"
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-mono"
-                    required
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  รหัสผ่าน (6+ ตัวอักษร)
-                </label>
-                <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    autoComplete="new-password"
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-300 bg-white text-sm"
-                    required
-                  />
-                </div>
-              </div>
-              <div className="sm:col-span-2">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full py-2.5 px-4 text-white text-sm font-semibold rounded-xl shadow-xs hover:opacity-95 disabled:opacity-50"
-                  style={{
-                    background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
-                  }}
-                >
-                  {submitting ? 'กำลังสร้างบัญชี...' : 'สร้างบัญชีผู้ใช้งานและไปขั้นตอนสร้างโรงเรียน'}
-                </button>
-              </div>
-            </form>
+            <div className="mt-6 space-y-4">
+              <p className="text-sm text-slate-600 leading-relaxed">
+                เข้าสู่ระบบด้วยบัญชี Google ของผู้ดูแลโรงเรียนเพื่อสร้างพื้นที่ทำงานและทดลองใช้งานฟรี {platformSettings.trialDays} วัน
+              </p>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => void handleGoogleSignup()}
+                className="w-full py-3 px-4 text-white text-sm font-semibold rounded-xl shadow-xs hover:opacity-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{
+                  background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`,
+                }}
+              >
+                <LogIn className="w-4 h-4" />
+                <span>{submitting ? 'กำลังเข้าสู่ระบบ...' : 'ดำเนินการต่อด้วย Google'}</span>
+              </button>
+            </div>
           )}
 
           {currentUser && (
@@ -220,7 +165,7 @@ export function SchoolSignupPage() {
               <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-2.5 text-xs font-medium text-emerald-900">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>
-                  เข้าสู่ระบบแล้ว: <span className="font-mono font-bold">@{currentUser.username}</span> ({currentUser.displayName})
+                  ยืนยันตัวตนแล้ว: <span className="font-mono font-bold">{currentUser.email}</span> ({currentUser.displayName})
                 </span>
               </div>
 

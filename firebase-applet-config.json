@@ -1,12 +1,12 @@
 {
-  "projectId": "intense-nomad-7hl8x",
-  "appId": "1:121361309749:web:94363912c8c2581388d17c",
-  "apiKey": "AIzaSyBjrwJDLSRxmJbjLqzpz_oxHiRhiK7vmvk",
-  "authDomain": "intense-nomad-7hl8x.firebaseapp.com",
+  "projectId": "school-timetable-system",
+  "appId": "1:658645673965:web:942c6ff0a94627a0d2e9e4",
+  "apiKey": "AIzaSyAeMgRWEFrf91g1mkr4R119fasA96hB6gg",
+  "authDomain": "school-timetable-system.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-8e3236e4-4017-4e06-943f-fe9ab04bfb07",
-  "storageBucket": "intense-nomad-7hl8x.firebasestorage.app",
-  "messagingSenderId": "121361309749",
+  "storageBucket": "school-timetable-system.firebasestorage.app",
+  "messagingSenderId": "658645673965",
   "measurementId": "",
-  "oAuthClientId": "121361309749-n3vvfjgno3t9m6pqkp57oa40mq8tiuo7.apps.googleusercontent.com",
+  "oAuthClientId": "658645673965-6tm0rgd2in4ae268c5aihifdo6lggav6.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }
