@@ -1,0 +1,10 @@
+.data/
+.env
+.env.*
+!.env.example
+dist/
+functions/
+firestore.rules.test.ts
+DRAFT_firestore.rules
+security_spec.md
+node_modules/

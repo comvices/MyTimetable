@@ -116,7 +116,7 @@ export function LandingPricingPage() {
             >
               <CalendarRange className="w-4 h-4" />
             </span>
-            <span>KruSchedule</span>
+            <span>ระบบจัดตารางสอน</span>
           </Link>
 
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
@@ -447,7 +447,7 @@ export function LandingPricingPage() {
       {/* Footer */}
       <footer className="bg-white/90 border-t py-8" style={{ borderColor: theme.border }}>
         <div className="max-w-[1280px] mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <div>© {new Date().getFullYear()} KruSchedule SaaS · Multi-Tenant School Timetable Platform</div>
+          <div>© {new Date().getFullYear()} ระบบจัดตารางสอน · Multi-Tenant School Timetable Platform</div>
           <div className="flex items-center gap-6">
             <Link to="/privacy" className="hover:text-slate-900">
               นโยบายความเป็นส่วนตัว (PDPA)

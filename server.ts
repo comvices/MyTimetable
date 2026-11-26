@@ -1,23 +1,68 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
 const PORT = Number(process.env.PORT || 3000);
-const TOKEN_SECRET =
-  process.env.AUTH_TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
-const GATEWAY_SECRET =
-  process.env.PAYMENT_GATEWAY_SECRET || crypto.randomBytes(32).toString('hex');
+const IS_VERCEL = Boolean(process.env.VERCEL);
+
+const STORE_DIR = IS_VERCEL
+  ? path.resolve(os.tmpdir(), 'kruschedule-data')
+  : path.resolve(process.cwd(), '.data');
+const STORE_FILE = path.resolve(STORE_DIR, 'saas-store.json');
+const RUNTIME_SECRETS_FILE = path.resolve(STORE_DIR, '.runtime-secrets.json');
+
+function resolveRuntimeSecrets(): { tokenSecret: string; gatewaySecret: string } {
+  const envToken = process.env.AUTH_TOKEN_SECRET?.trim();
+  const envGateway = process.env.PAYMENT_GATEWAY_SECRET?.trim();
+  if (envToken && envGateway) {
+    return { tokenSecret: envToken, gatewaySecret: envGateway };
+  }
+
+  let stored: { tokenSecret?: string; gatewaySecret?: string } = {};
+  try {
+    if (fs.existsSync(RUNTIME_SECRETS_FILE)) {
+      stored = JSON.parse(fs.readFileSync(RUNTIME_SECRETS_FILE, 'utf-8')) as {
+        tokenSecret?: string;
+        gatewaySecret?: string;
+      };
+    }
+  } catch {
+    stored = {};
+  }
+
+  const tokenSecret = envToken || stored.tokenSecret || crypto.randomBytes(32).toString('hex');
+  const gatewaySecret = envGateway || stored.gatewaySecret || crypto.randomBytes(32).toString('hex');
+
+  if ((!envToken && !stored.tokenSecret) || (!envGateway && !stored.gatewaySecret)) {
+    try {
+      if (!fs.existsSync(STORE_DIR)) {
+        fs.mkdirSync(STORE_DIR, { recursive: true });
+      }
+      fs.writeFileSync(
+        RUNTIME_SECRETS_FILE,
+        JSON.stringify({ tokenSecret, gatewaySecret }),
+        'utf-8'
+      );
+    } catch {
+      // Ephemeral fallback if filesystem is read-only
+    }
+  }
+
+  return { tokenSecret, gatewaySecret };
+}
+
+const runtimeSecrets = resolveRuntimeSecrets();
+const TOKEN_SECRET = runtimeSecrets.tokenSecret;
+const GATEWAY_SECRET = runtimeSecrets.gatewaySecret;
 
 const ENV_ADMIN_USERNAME = (process.env.SUPER_ADMIN_USERNAME || 'admin').trim() || 'admin';
 const ENV_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || '';
-
-const STORE_DIR = path.resolve(process.cwd(), '.data');
-const STORE_FILE = path.resolve(STORE_DIR, 'saas-store.json');
 
 type UserRole = 'super_admin' | 'school_admin' | 'scheduler' | 'teacher';
 type SubscriptionStatus =
@@ -301,6 +346,8 @@ function persistStore(): void {
     }
     fs.writeFileSync(tmpFile, JSON.stringify(store, null, 2), 'utf-8');
     fs.renameSync(tmpFile, STORE_FILE);
+  } catch (err) {
+    console.warn('Store persistence warning (continuing with in-memory state):', err);
   } finally {
     writePending = false;
   }
@@ -772,7 +819,7 @@ function safeEqualHex(a: string, b: string): boolean {
   }
 }
 
-async function startServer() {
+export function createApiApp(): express.Express {
   const app = express();
   app.use(express.json({ limit: '4mb' }));
 
@@ -801,7 +848,7 @@ async function startServer() {
   };
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, service: 'KruSchedule SaaS API', timestamp: new Date().toISOString() });
+    res.json({ ok: true, service: 'ระบบจัดตารางสอน API', timestamp: new Date().toISOString() });
   });
 
   // ---------------------------------------------------------
@@ -2486,7 +2533,19 @@ async function startServer() {
     res.json({ user: toPublicUser(target) });
   });
 
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'ไม่พบ API endpoint ที่ต้องการ' });
+  });
+
+  return app;
+}
+
+export const app = createApiApp();
+
+async function startStandaloneServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const viteModule = 'vite';
+    const { createServer: createViteServer } = await import(/* @vite-ignore */ viteModule);
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -2501,11 +2560,24 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`KruSchedule SaaS server listening on http://0.0.0.0:${PORT}`);
+    console.log(`ระบบจัดตารางสอน server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+let isMainEntry = false;
+try {
+  if (!IS_VERCEL && process.argv[1]) {
+    isMainEntry =
+      fs.realpathSync(path.resolve(process.argv[1])) ===
+      fs.realpathSync(fileURLToPath(import.meta.url));
+  }
+} catch {
+  isMainEntry = false;
+}
+
+if (isMainEntry) {
+  startStandaloneServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}

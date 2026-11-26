@@ -44,7 +44,7 @@ export function LegalPage({ mode }: { mode: 'privacy' | 'terms' }) {
           {isPrivacy ? (
             <>
               <p>
-                แพลตฟอร์ม KruSchedule SaaS ให้ความสำคัญกับการคุ้มครองข้อมูลส่วนบุคคลตามพระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 (PDPA)
+                ระบบจัดตารางสอน ให้ความสำคัญกับการคุ้มครองข้อมูลส่วนบุคคลตามพระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 (PDPA)
               </p>
               <h2 className="text-base font-bold text-slate-900 pt-2">1. การแยกข้อมูลระดับโรงเรียน (Tenant Isolation)</h2>
               <p>
@@ -62,7 +62,7 @@ export function LegalPage({ mode }: { mode: 'privacy' | 'terms' }) {
           ) : (
             <>
               <p>
-                ข้อตกลงนี้ครอบคลุมการใช้งานระบบบริหารจัดการตารางสอน KruSchedule SaaS แบบสมัครสมาชิกรายปี
+                ข้อตกลงนี้ครอบคลุมการใช้งาน ระบบจัดตารางสอน แบบสมัครสมาชิกรายปี
               </p>
               <h2 className="text-base font-bold text-slate-900 pt-2">1. ช่วงทดลองใช้งานฟรี 14 วัน</h2>
               <p>

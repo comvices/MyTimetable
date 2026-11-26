@@ -1,8 +1,8 @@
 import { READ_ONLY_STATUSES, School, SubscriptionStatus } from '../types/saas';
 
 export const DEFAULT_BRANDING = {
-  nameTh: 'KruSchedule SaaS',
-  nameEn: 'School Timetable Platform',
+  nameTh: 'ระบบจัดตารางสอน',
+  nameEn: 'School Timetable System',
   primaryColor: '#4A7BD0',
   secondaryColor: '#7DB2F0',
   welcomeMessage: 'ยินดีต้อนรับสู่ระบบบริหารจัดการตารางสอนและตารางเรียนออนไลน์',
